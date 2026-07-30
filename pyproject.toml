@@ -1,0 +1,73 @@
+[project]
+name = "dcoder"
+version = "0.1.0"
+description = "CLI-first coding agent for DevOps infrastructure-as-code"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "agent-client-protocol>=0.11.0",
+    "aiosqlite>=0.22.1",
+    "anyio>=4.14.2",
+    "boto3>=1.43.51",
+    "deepagents>=0.6.12",
+    "deepagents-acp>=0.0.9",
+    "httpx>=0.28.1",
+    "langchain>=1.3.14",
+    "langchain-core>=1.4.9",
+    "langchain-mcp-adapters>=0.3.0",
+    "langchain-openai>=1.3.5",
+    "langchain-quickjs>=0.3.3",
+    "langgraph>=1.2.9",
+    "langgraph-cli[inmem]>=0.4.31",
+    "langgraph-checkpoint-sqlite>=3.1.0",
+    "langgraph-sdk>=0.4.2",
+    "langsmith>=0.10.6",
+    "markdown-it-py>=4.2.0",
+    "markdownify>=1.2.3",
+    "mcp>=1.28.1",
+    "packaging>=26.2",
+    "pillow>=12.3.0",
+    "pydantic>=2.13.4",
+    "pygments>=2.20.0",
+    "pyperclip>=1.11.0",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "requests>=2.34.2",
+    "rich>=15.0.0",
+    "tavily-python>=0.7.26",
+    "textual>=8.2.8",
+    "tomli-w>=1.2.0",
+    "typing-extensions>=4.16.0",
+    "urllib3>=2.7.0",
+    "uuid-utils>=0.17.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+dcoder = "dcoder.cli.main:cli_main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dcoder"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/dcoder/built_in_skills" = "dcoder/built_in_skills"
+
+[tool.pyright]
+include = ["src", "tests"]
+extraPaths = ["src"]
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
