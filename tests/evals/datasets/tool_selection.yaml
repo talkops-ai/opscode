@@ -1,0 +1,74 @@
+# Tool Selection Eval Dataset
+# Tests that the agent selects the correct tools for common DevOps tasks.
+
+scenarios:
+  # ── Terraform tasks ────────────────
+  - name: terraform_validate
+    input: "Validate my Terraform configuration"
+    expected:
+      tools_used: ["execute"]
+      tool_args_contain:
+        execute: "terraform validate"
+      success: true
+
+  - name: terraform_plan
+    input: "Show me what Terraform would change"
+    expected:
+      tools_used: ["execute"]
+      tool_args_contain:
+        execute: "terraform plan"
+      success: true
+
+  # ── Kubectl tasks ──────────────────
+  - name: kubectl_get_pods
+    input: "List all pods in the default namespace"
+    expected:
+      tools_used: ["execute"]
+      tool_args_contain:
+        execute: "kubectl get pods"
+      success: true
+
+  - name: kubectl_describe
+    input: "Describe the nginx deployment"
+    expected:
+      tools_used: ["execute"]
+      tool_args_contain:
+        execute: "kubectl describe"
+      success: true
+
+  # ── Helm tasks ─────────────────────
+  - name: helm_lint
+    input: "Lint my Helm chart at ./charts/myapp"
+    expected:
+      tools_used: ["execute"]
+      tool_args_contain:
+        execute: "helm lint"
+      success: true
+
+  # ── File operations ────────────────
+  - name: read_file
+    input: "Show me the contents of main.tf"
+    expected:
+      tools_used: ["read_file"]
+      success: true
+
+  - name: write_file
+    input: "Create a new file called output.tf with a VPC output"
+    expected:
+      tools_used: ["write_file"]
+      success: true
+
+  # ── Web search ─────────────────────
+  - name: web_search
+    input: "What is the latest version of Terraform?"
+    expected:
+      tools_used: ["web_search"]
+      success: true
+
+  # ── Multi-tool tasks ───────────────
+  - name: read_then_edit
+    input: "Read the main.tf file and add a new resource block"
+    expected:
+      tools_used: ["read_file", "write_file"]
+      tools_order: ["read_file", "write_file"]
+      success: true

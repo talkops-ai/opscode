@@ -165,47 +165,59 @@ class DoctorHandler(BaseCommandHandler):
 
     def _collect_configuration(self, ctx: CommandContext) -> DiagnosticSection:
         """Check data directory and config file existence."""
-        from dcoder.config.manifest import DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_PATH
+        from dcoder.config import paths as config_paths
+        from dcoder.config.paths import classify_path, PathState
 
         items: list[DiagnosticItem] = []
 
         # Data directory
-        exists = DEFAULT_CONFIG_DIR.exists()
+        state = classify_path(config_paths.DATA_DIR)
         items.append(DiagnosticItem(
             "Data directory",
-            f"{DEFAULT_CONFIG_DIR} ({'exists' if exists else 'not created'})",
-            ok=True,  # Not existing yet is OK — created on first use
+            f"{config_paths.DATA_DIR} ({state})",
+            ok=state != PathState.UNREADABLE,
+        ))
+
+        # State directory
+        state = classify_path(config_paths.STATE_DIR)
+        items.append(DiagnosticItem(
+            "State directory",
+            f"{config_paths.STATE_DIR} ({state})",
+            ok=state != PathState.UNREADABLE,
         ))
 
         # Config file
-        cfg_exists = DEFAULT_CONFIG_PATH.exists()
+        cfg_state = classify_path(config_paths.CONFIG_PATH)
         items.append(DiagnosticItem(
             "Config file",
-            f"{DEFAULT_CONFIG_PATH} ({'exists' if cfg_exists else 'not created'})",
+            f"{config_paths.CONFIG_PATH} ({cfg_state})",
             ok=True,
         ))
 
         # Validate TOML syntax if config exists
-        if cfg_exists:
+        if cfg_state == PathState.EXISTS:
             try:
                 import tomllib
-                with open(DEFAULT_CONFIG_PATH, "rb") as f:
+                with open(config_paths.CONFIG_PATH, "rb") as f:
                     tomllib.load(f)
                 items.append(DiagnosticItem("Config syntax", "valid TOML"))
             except Exception as e:
                 items.append(DiagnosticItem(
                     "Config syntax", f"PARSE ERROR: {e}", ok=False,
-                    tip=f"Fix syntax in {DEFAULT_CONFIG_PATH}",
+                    tip=f"Fix syntax in {config_paths.CONFIG_PATH}",
                 ))
 
-        # Credentials files
-        cred_paths = [
-            ("credentials.env", DEFAULT_CONFIG_DIR / ".state" / "credentials.env"),
-            (".env", DEFAULT_CONFIG_DIR / ".env"),
+        # Standard config files
+        config_files = [
+            (".env", config_paths.GLOBAL_ENV_PATH),
+            ("hooks.json", config_paths.HOOKS_PATH),
+            (".mcp.json", config_paths.GLOBAL_MCP_PATH),
+            ("auth.json", config_paths.AUTH_PATH),
         ]
-        for name, path in cred_paths:
-            if path.exists():
-                items.append(DiagnosticItem(name, f"{path} (exists)"))
+        for name, path in config_files:
+            fstate = classify_path(path)
+            if fstate == PathState.EXISTS:
+                items.append(DiagnosticItem(name, f"{path} ({fstate})"))
 
         return DiagnosticSection(title="Configuration", items=items)
 
@@ -320,8 +332,8 @@ class DoctorHandler(BaseCommandHandler):
             items.append(DiagnosticItem("Settings", "not loaded", ok=False))
             return DiagnosticSection(title="Agent Definitions", items=items)
 
-        from dcoder.config.manifest import DEFAULT_CONFIG_DIR, DEFAULT_AGENT_NAME
-        global_md = DEFAULT_CONFIG_DIR / DEFAULT_AGENT_NAME / "AGENTS.md"
+        from dcoder.config.paths import user_agent_md, DEFAULT_AGENT_NAME
+        global_md = user_agent_md(DEFAULT_AGENT_NAME)
         items.append(DiagnosticItem(
             "Global AGENTS.md",
             f"{'exists' if global_md.exists() else 'not created'}",
@@ -350,7 +362,7 @@ class DoctorHandler(BaseCommandHandler):
 
         if ctx.settings:
             if hasattr(ctx.settings, "get_user_skills_dir"):
-                user_skills = ctx.settings.get_user_skills_dir("dcoder")
+                user_skills = ctx.settings.get_user_skills_dir()
                 items.append(DiagnosticItem(
                     "User skills dir",
                     f"{'exists' if user_skills.exists() else 'not created'}",

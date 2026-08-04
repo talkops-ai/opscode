@@ -40,6 +40,7 @@ Scrollbar:hover {
     height: 1fr;
     background: $background;
     scrollbar-size-vertical: 1;
+    padding-bottom: 1;
 }
 
 /* ── Bottom container ────────────────────────────────── */
@@ -82,7 +83,6 @@ Scrollbar:hover {
 StatusBar {
     dock: bottom;
     height: 1;
-    background: $surface;
     color: $foreground;
     padding: 0 1;
 }
@@ -197,31 +197,8 @@ SkillMessage:hover {
 
 /* ── Approval overlay ────────────────────────────────── */
 
-ApprovalMenu {
-    layer: overlay;
-    dock: bottom;
-    height: auto;
-    max-height: 16;
-    background: $surface;
-    border: tall $warning;
-    padding: 1 2;
-}
+/* ApprovalMenu styles are now contained within the component's DEFAULT_CSS */
 
-ApprovalMenu .approval-title {
-    color: $warning;
-    text-style: bold;
-    margin-bottom: 1;
-}
-
-ApprovalMenu .approval-detail {
-    color: $foreground;
-    margin-bottom: 1;
-}
-
-ApprovalMenu .approval-buttons {
-    layout: horizontal;
-    height: 3;
-}
 
 /* ── Overlay panels (model/thread/mcp selectors) ─────── */
 

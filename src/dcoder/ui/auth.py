@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dcoder.config.paths import GLOBAL_ENV_PATH, ensure_data_dir, upsert_env_vars
 from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar
 
@@ -586,14 +587,14 @@ class AuthPromptScreen(ModalScreen[AuthResult]):
                 os.environ["LANGSMITH_ENDPOINT"] = endpoint
 
             try:
-                dcoder_dir = os.path.expanduser("~/.dcoder")
-                state_dir = os.path.join(dcoder_dir, ".state")
-                os.makedirs(state_dir, exist_ok=True)
-                for path in (os.path.join(dcoder_dir, ".env"), os.path.join(state_dir, "credentials.env")):
-                    with open(path, "a", encoding="utf-8") as f:
-                        f.write(f"\nLANGSMITH_API_KEY={cleaned}\nLANGSMITH_TRACING=true\nLANGSMITH_PROJECT={proj}\n")
-                        if endpoint:
-                            f.write(f"LANGSMITH_ENDPOINT={endpoint}\n")
+                ls_vars = {
+                    "LANGSMITH_API_KEY": cleaned,
+                    "LANGSMITH_TRACING": "true",
+                    "LANGSMITH_PROJECT": proj,
+                }
+                if endpoint:
+                    ls_vars["LANGSMITH_ENDPOINT"] = endpoint
+                upsert_env_vars(ls_vars)
             except Exception as e:
                 logger.debug("Failed to persist LangSmith credentials to file: %s", e)
 
@@ -647,20 +648,19 @@ class AuthPromptScreen(ModalScreen[AuthResult]):
             logger.info("Set base URL for %s: %s", self._provider, base_url_var)
 
         try:
-            dcoder_dir = os.path.expanduser("~/.dcoder")
-            state_dir = os.path.join(dcoder_dir, ".state")
-            os.makedirs(state_dir, exist_ok=True)
-            for path in (os.path.join(dcoder_dir, ".env"), os.path.join(state_dir, "credentials.env")):
-                with open(path, "a", encoding="utf-8") as f:
-                    if cleaned:
-                        f.write(f"\n{self._env_var}={cleaned}\n")
-                    if base_url:
-                        base_url_var = f"{self._provider.upper()}_BASE_URL"
-                        f.write(f"{base_url_var}={base_url}\n")
-                    if vertex_env_val is not None:
-                        f.write(f"GOOGLE_GENAI_USE_VERTEXAI={vertex_env_val}\n")
+            prov_vars = {}
+            if cleaned:
+                prov_vars[self._env_var] = cleaned
+            if base_url:
+                base_url_var = f"{self._provider.upper()}_BASE_URL"
+                prov_vars[base_url_var] = base_url
+            if vertex_env_val is not None:
+                prov_vars["GOOGLE_GENAI_USE_VERTEXAI"] = vertex_env_val
+            if prov_vars:
+                upsert_env_vars(prov_vars)
         except Exception as e:
             logger.debug("Failed to persist credentials to file: %s", e)
+
 
         try:
             self.app.notify(

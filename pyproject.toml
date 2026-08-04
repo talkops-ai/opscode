@@ -9,15 +9,16 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "anyio>=4.14.2",
     "boto3>=1.43.51",
-    "deepagents>=0.6.12",
+    "deepagents[quickjs]>=0.7.1",
     "deepagents-acp>=0.0.9",
     "httpx>=0.28.1",
     "langchain>=1.3.14",
-    "langchain-core>=1.4.9",
+    "langchain-core>=1.5.3",
     "langchain-mcp-adapters>=0.3.0",
-    "langchain-openai>=1.3.5",
-    "langchain-quickjs>=0.3.3",
-    "langgraph>=1.2.9",
+    "langchain-openai>=1.4.1",
+    "langchain-anthropic>=1.5.3",
+    "langchain-google-genai>=4.3.2",
+    "langgraph>=1.2.10",
     "langgraph-cli[inmem]>=0.4.31",
     "langgraph-checkpoint-sqlite>=3.1.0",
     "langgraph-sdk>=0.4.2",
@@ -40,12 +41,21 @@ dependencies = [
     "typing-extensions>=4.16.0",
     "urllib3>=2.7.0",
     "uuid-utils>=0.17.0",
+    "genai-prices>=0.1.0",
 ]
+
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
+    "pytest-cov>=5.0",
+]
+test-integration = [
+    "agentevals>=0.0.8",
+    "langsmith>=0.10.6",
 ]
 
 [project.scripts]
@@ -71,3 +81,8 @@ venv = ".venv"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "unit: Fast deterministic unit tests (no API keys needed)",
+    "integration: Tests requiring real LLM APIs and external services",
+    "eval: Agent behavior evaluation tests with LangSmith datasets",
+]

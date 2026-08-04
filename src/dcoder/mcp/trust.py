@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from dcoder.config.manifest import DEFAULT_CONFIG_DIR
+from dcoder.config.paths import MCP_TRUST_PATH
 
 logger = logging.getLogger("dcoder")
 
@@ -25,7 +25,7 @@ _STORAGE_VERSION = 1
 
 def _default_store_path() -> Path:
     """Return `~/.dcoder/.state/mcp_trust.json`."""
-    return DEFAULT_CONFIG_DIR / ".state" / "mcp_trust.json"
+    return MCP_TRUST_PATH
 
 
 def compute_config_fingerprint(config_paths: list[Path]) -> str:

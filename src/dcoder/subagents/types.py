@@ -8,6 +8,8 @@ class SubagentMetadata(TypedDict):
     description: str
     system_prompt: str
     model: NotRequired[str | None]
+    skills: NotRequired[list[str] | None]
+    tools: NotRequired[list[str] | None]
     source: str
     path: str
 

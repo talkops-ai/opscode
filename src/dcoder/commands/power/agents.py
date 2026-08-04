@@ -67,10 +67,11 @@ class AgentsHandler(BaseCommandHandler):
 def _list_agents() -> list[dict[str, str]]:
     """Discover agent configurations from standard directories."""
     from pathlib import Path
+    from dcoder.config import paths as config_paths
 
     agents: list[dict[str, str]] = []
     search_dirs: list[tuple[Path, str]] = [
-        (Path.home() / ".dcoder" / "agents", "user"),
+        (config_paths.user_agents_dir(), "user"),
         (Path.cwd() / ".dcoder" / "agents", "project"),
     ]
 

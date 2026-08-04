@@ -1,6 +1,5 @@
-"""Re-export RubricMiddleware from deepagents SDK."""
+"""Re-export RubricMiddleware from dcoder middleware registry."""
 
-import warnings
-from deepagents.middleware import RubricMiddleware
+from dcoder.middleware.reliable_rubric import ReliableRubricMiddleware as RubricMiddleware
 
 __all__ = ["RubricMiddleware"]

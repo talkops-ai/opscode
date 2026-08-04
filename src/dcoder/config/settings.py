@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from dcoder.config import paths
 from dcoder.config.manifest import (
     ENV_PREFIX,
     DEFAULT_CONFIG_DIR,
@@ -95,14 +96,10 @@ def _load_dotenv(*, start_path: Path | None = None, refresh_loaded: bool = False
         
     loaded_vals: dict[str, str | None] = {}
     
-    # 1. Global ~/.dcoder/.env and ~/.dcoder/.state/credentials.env (lower priority)
-    global_env = DEFAULT_CONFIG_DIR / ".env"
+    # 1. Global ~/.dcoder/.env (individual provider keys live here)
+    global_env = paths.GLOBAL_ENV_PATH
     if global_env.is_file():
         loaded_vals.update(dotenv_values(global_env))
-
-    credentials_env = DEFAULT_CONFIG_DIR / ".state" / "credentials.env"
-    if credentials_env.is_file():
-        loaded_vals.update(dotenv_values(credentials_env))
         
     # 2. Project/CWD .env (higher priority, overwrites global)
     if project_env:
@@ -158,6 +155,9 @@ class Settings:
     model_unsupported_modalities: frozenset[str] = field(default_factory=frozenset)
     reasoning_effort: str | None = None
     
+    # Assistant / Agent ID
+    assistant_id: str | None = None
+
     # Project
     project_root: Path | None = None
     
@@ -168,9 +168,12 @@ class Settings:
     extra_skills_dirs: list[Path] | None = None
 
     # Interpreter
-    enable_interpreter: bool = False
-    interpreter_ptc: str | list[str] | None = None
+    enable_interpreter: bool = True
+    interpreter_ptc: str | list[str] | None = "safe"
     interpreter_ptc_acknowledge_unsafe: bool = False
+    
+    # Telemetry / Tracing
+    user_langchain_project: str | None = "dcoder"
 
     # Display / UI (curated settings surfaced in /config)
     theme: str = "dark"
@@ -196,12 +199,12 @@ class Settings:
         
     @property
     def user_dcoder_dir(self) -> Path:
-        return DEFAULT_CONFIG_DIR
+        return paths.DATA_DIR
         
     @property
     def config_path(self) -> Path:
         """Return the path to the active config file."""
-        return DEFAULT_CONFIG_PATH
+        return paths.CONFIG_PATH
 
     def to_display_dict(self) -> dict[str, str]:
         """Return all non-None fields as a display-friendly ordered dict.
@@ -341,62 +344,60 @@ class Settings:
         return bool(re.match(r"^[a-zA-Z0-9_\-\s]+$", agent_name))
         
     def get_agent_dir(self, agent_name: str) -> Path:
-        if not self._is_valid_agent_name(agent_name):
-            raise ValueError(
-                f"Invalid agent name: {agent_name!r}. Agent names can only "
-                "contain letters, numbers, hyphens, underscores, and spaces."
-            )
-        return DEFAULT_CONFIG_DIR / agent_name
+        return paths.agent_dir(agent_name)
+        
+    def ensure_config_dir(self) -> Path:
+        return paths.ensure_data_dir()
+        
+    def ensure_state_dir(self) -> Path:
+        return paths.ensure_state_dir()
         
     def ensure_agent_dir(self, agent_name: str) -> Path:
-        agent_dir = self.get_agent_dir(agent_name)
-        agent_dir.mkdir(parents=True, exist_ok=True)
-        return agent_dir
+        return paths.ensure_agent_dir(agent_name)
         
-    def get_user_skills_dir(self, agent_name: str) -> Path:
-        return self.get_agent_dir(agent_name) / "skills"
-        
-    def ensure_user_skills_dir(self, agent_name: str) -> Path:
-        skills_dir = self.get_user_skills_dir(agent_name)
-        skills_dir.mkdir(parents=True, exist_ok=True)
-        return skills_dir
+    def get_user_skills_dir(self, agent_name: str | None = None) -> Path:
+        name = agent_name or self.assistant_id or paths.DEFAULT_AGENT_NAME
+        return paths.user_skills_dir(name)
+
+    def ensure_user_skills_dir(self, agent_name: str | None = None) -> Path:
+        d = self.get_user_skills_dir(agent_name)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
         
     def get_project_skills_dir(self) -> Path | None:
         if not self.project_root:
             return None
-        return self.project_root / ".dcoder" / "skills"
+        return paths.project_skills_dir(self.project_root)
         
     def ensure_project_skills_dir(self) -> Path | None:
         if not self.project_root:
             return None
-        skills_dir = self.get_project_skills_dir()
-        if skills_dir:
-            skills_dir.mkdir(parents=True, exist_ok=True)
-        return skills_dir
+        d = self.get_project_skills_dir()
+        if d:
+            d.mkdir(parents=True, exist_ok=True)
+        return d
         
-    def get_user_agents_dir(self, agent_name: str) -> Path:
-        return self.get_agent_dir(agent_name) / "agents"
+    def get_user_agents_dir(self, agent_name: str | None = None) -> Path:
+        name = agent_name or self.assistant_id or paths.DEFAULT_AGENT_NAME
+        return paths.user_agents_dir(name)
         
     def get_project_agents_dir(self) -> Path | None:
         if not self.project_root:
             return None
-        return self.project_root / ".dcoder" / "agents"
+        return paths.project_agents_dir(self.project_root)
         
-    @staticmethod
-    def get_user_agent_md_path(agent_name: str) -> Path:
-        return DEFAULT_CONFIG_DIR / agent_name / "AGENTS.md"
+    def get_user_agent_md_path(self, agent_name: str | None = None) -> Path:
+        name = agent_name or self.assistant_id or paths.DEFAULT_AGENT_NAME
+        return paths.user_agent_md(name)
         
     def get_project_agent_md_path(self) -> list[Path]:
         if not self.project_root:
             return []
-        paths = []
-        for candidate in [
-            self.project_root / ".dcoder" / "AGENTS.md",
-            self.project_root / "AGENTS.md",
-        ]:
+        result = []
+        for candidate in paths.project_agent_md_paths(self.project_root):
             if candidate.is_file():
-                paths.append(candidate)
-        return paths
+                result.append(candidate)
+        return result
 
     def get_extra_skills_dirs(self) -> list[Path]:
         return self.extra_skills_dirs or []

@@ -112,7 +112,7 @@ class AuthManagerScreen(ModalScreen[None]):
             yield Static("Manage API Keys", classes="auth-mgr-title")
             yield Static(
                 "Select a provider to add, replace, or delete its API key. "
-                "Keys are stored in ~/.dcoder/.state/credentials.env.",
+                "Keys are stored in ~/.dcoder/.env.",
                 classes="auth-mgr-desc",
             )
             yield OptionList(*options, id="auth-mgr-options")

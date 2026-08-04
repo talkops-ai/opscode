@@ -182,6 +182,53 @@ class RemoteAgent:
                 return None
             raise
 
+    async def aupdate_state(
+        self,
+        config: dict[str, Any],
+        values: dict[str, Any],
+        *,
+        as_node: str | None = None,
+    ) -> Any:
+        """Write a state update into the thread checkpoint.
+
+        Delegates to ``RemoteGraph.aupdate_state``.
+        """
+        graph = self._get_graph()
+        prepared = _prepare_config(config)
+        kwargs: dict[str, Any] = {}
+        if as_node is not None:
+            kwargs["as_node"] = as_node
+        return await graph.aupdate_state(prepared, values, **kwargs)
+
+    async def aensure_thread(self, config: dict[str, Any]) -> None:
+        """Ensure the remote thread record exists before reading/mutating state.
+
+        After a server restart, a thread may still have checkpointed state on
+        disk while the server's live store has no record of it. This method
+        performs idempotent HTTP-side registration so subsequent ``aget_state``
+        and ``aupdate_state`` calls work correctly.
+
+        Reference: ``RemoteAgent.aensure_thread`` in reference client.
+        """
+        graph = self._get_graph()
+        prepared = _prepare_config(config)
+        thread_id = prepared["configurable"].get("thread_id")
+        if not thread_id:
+            return
+
+        try:
+            client = graph._validate_client()
+            await client.threads.create(
+                thread_id=thread_id,
+                if_exists="do_nothing",
+            )
+        except Exception:
+            logger.warning(
+                "Failed to ensure thread %s exists on remote server",
+                thread_id,
+                exc_info=True,
+            )
+
     async def create_thread(self) -> dict[str, Any]:
         """Create thread using SDK client."""
         client = self._get_graph()._validate_client()

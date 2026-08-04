@@ -1,0 +1,110 @@
+# Command Routing Eval Dataset
+# Tests that slash commands are correctly parsed, routed, and produce expected outcomes.
+
+scenarios:
+  # ── Core commands ──────────────────
+  - name: help_command
+    input: "/help"
+    expected:
+      command: "help"
+      success: true
+      contains: ["Available commands", "/help"]
+
+  - name: help_specific_command
+    input: "/help goal"
+    expected:
+      command: "help"
+      success: true
+      contains: ["goal"]
+
+  - name: exit_command
+    input: "/exit"
+    expected:
+      command: "exit"
+      success: true
+
+  - name: version_command
+    input: "/version"
+    expected:
+      command: "version"
+      success: true
+      contains: ["dcoder"]
+
+  # ── Power commands ─────────────────
+  - name: goal_show_no_goal
+    input: "/goal show"
+    expected:
+      command: "goal"
+      subcommand: "show"
+      success: true
+      contains: ["No goal set"]
+
+  - name: goal_set_objective
+    input: "/goal Deploy a VPC with 3 subnets"
+    expected:
+      command: "goal"
+      subcommand: "set"
+      success: true
+      contains: ["Goal set"]
+
+  - name: goal_clear
+    input: "/goal clear"
+    expected:
+      command: "goal"
+      subcommand: "clear"
+      success: true
+
+  - name: rubric_show
+    input: "/rubric show"
+    expected:
+      command: "rubric"
+      success: true
+
+  - name: tasks_list_empty
+    input: "/tasks"
+    expected:
+      command: "tasks"
+      success: true
+      contains: ["No tasks"]
+
+  - name: tasks_add
+    input: "/tasks add Fix CI pipeline"
+    expected:
+      command: "tasks"
+      subcommand: "add"
+      success: true
+      contains: ["#1"]
+
+  # ── Alias routing ──────────────────
+  - name: alias_s_for_sample
+    input: "/s test"
+    expected:
+      resolves_to: "sample"
+      success: true
+
+  # ── Unknown command ────────────────
+  - name: unknown_command
+    input: "/nonexistent"
+    expected:
+      success: false
+      contains: ["Unknown command"]
+
+  - name: empty_command
+    input: "   "
+    expected:
+      success: false
+      contains: ["Empty command"]
+
+  # ── Edge cases ─────────────────────
+  - name: case_insensitive_routing
+    input: "/HELP"
+    expected:
+      command: "help"
+      success: true
+
+  - name: btw_no_args_error
+    input: "/btw"
+    expected:
+      command: "btw"
+      success: false
+      contains: ["Usage"]

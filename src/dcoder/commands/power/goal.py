@@ -219,11 +219,11 @@ class GoalHandler(BaseCommandHandler):
 
         # ── pause ────────────────────────────────────────
         if subcommand == "pause":
-            return self._pause_goal(state)
+            return await self._pause_goal(ctx, state)
 
         # ── resume ───────────────────────────────────────
         if subcommand == "resume":
-            return self._resume_goal(state)
+            return await self._resume_goal(ctx, state)
 
         # ── accept / edit (informational) ────────────────
         if subcommand in {"accept", "edit"}:
@@ -235,17 +235,22 @@ class GoalHandler(BaseCommandHandler):
 
         # ── clear ────────────────────────────────────────
         if subcommand == "clear":
-            state.clear()
-            self._sync_status_rubric(ctx.app, state)
+            from langchain_core.messages import SystemMessage
+            async with ctx.app._goal_state_mutation_boundary():
+                state.clear()
+                self._sync_status_rubric(ctx.app, state)
+                await ctx.app._persist_goal_rubric_state(notice=SystemMessage(content="Goal cleared."))
             return CommandResult(
                 success=True,
                 message="Goal cleared.",
                 notify="Goal cleared",
+                mount_as_app_message=False,
             )
 
         # ── new objective ────────────────────────────────
-        objective = remainder
-        return await self._set_objective(ctx, state, objective)
+        # If it didn't match any subcommand logic above, treat the ENTIRE
+        # original string as the objective.
+        return await self._set_objective(ctx, state, remainder)
 
     # ── Subcommand implementations ───────────────────────
 
@@ -309,7 +314,7 @@ class GoalHandler(BaseCommandHandler):
             message="No goal set.\n\n" + _goal_usage_text(),
         )
 
-    def _pause_goal(self, state: GoalState) -> CommandResult:
+    async def _pause_goal(self, ctx: CommandContext, state: GoalState) -> CommandResult:
         """Persist a paused goal without clearing its objective or criteria.
 
         Reference: app.py L11187-L11227.
@@ -327,13 +332,20 @@ class GoalHandler(BaseCommandHandler):
                 message="Goal is blocked and already waiting for user input. Reply to "
                 "continue, or clear it with `/goal clear`.",
             )
-        state.status = "paused"
+        
+        from langchain_core.messages import SystemMessage
+        async with ctx.app._goal_state_mutation_boundary():
+            state.status = "paused"
+            self._sync_status_rubric(ctx.app, state)
+            await ctx.app._persist_goal_rubric_state(notice=SystemMessage(content="Goal paused. Use `/goal resume` to continue it."))
+            
         return CommandResult(
             success=True,
             message="Goal paused. Use `/goal resume` to continue it.",
+            mount_as_app_message=False,
         )
 
-    def _resume_goal(self, state: GoalState) -> CommandResult:
+    async def _resume_goal(self, ctx: CommandContext, state: GoalState) -> CommandResult:
         """Resume a paused goal from its persisted conversation state.
 
         Reference: app.py L11229-L11264.
@@ -348,8 +360,14 @@ class GoalHandler(BaseCommandHandler):
                 success=False,
                 message="Goal is not paused. Use `/goal show` to inspect its current state.",
             )
-        state.status = "active"
-        return CommandResult(success=True, message="Goal resumed.")
+            
+        from langchain_core.messages import SystemMessage
+        async with ctx.app._goal_state_mutation_boundary():
+            state.status = "active"
+            self._sync_status_rubric(ctx.app, state)
+            await ctx.app._persist_goal_rubric_state(notice=SystemMessage(content="Goal resumed."))
+            
+        return CommandResult(success=True, message="Goal resumed.", mount_as_app_message=False)
 
     def _dispatch_grader_model(self, state: GoalState, arg: str) -> CommandResult:
         """Route a grader-model argument to the shared setter.
@@ -404,107 +422,37 @@ class GoalHandler(BaseCommandHandler):
     async def _set_objective(
         self, ctx: CommandContext, state: GoalState, objective: str
     ) -> CommandResult:
-        """Generate rubric for a new objective via LLM."""
-        state.pending_objective = objective
-        state.pending_kind = "create"
-
-        # Try to generate rubric in background
-        app = ctx.app
-        try:
-            rubric = await asyncio.to_thread(
-                _generate_rubric, objective, model_spec=ctx.model_spec
-            )
-        except Exception as exc:
-            logger.warning("Rubric generation failed: %s", exc)
-            # Fallback: set goal without rubric
-            state.objective = objective
-            state.status = "active"
-            state.pending_objective = None
-            state.pending_kind = None
-            self._sync_status_rubric(app, state)
-            return CommandResult(
-                success=True,
-                message=f"🎯 Goal set (rubric generation failed: {exc}):\n\n{objective}",
-            )
-
-        state.pending_rubric = rubric
-
-        # Push GoalReviewScreen if TUI is available
-        if app is not None and hasattr(app, "_open_goal_review"):
-            try:
-                app._open_goal_review(objective, rubric)
-                return CommandResult(
-                    success=True,
-                    message=None,
-                    mount_as_app_message=False,
-                )
-            except Exception:
-                pass
-
-        # Fallback: auto-accept rubric if no review screen
-        state.objective = objective
-        state.status = "active"
-        state.rubric = rubric
-        state.pending_objective = None
-        state.pending_rubric = None
-        state.pending_kind = None
-        self._sync_status_rubric(app, state)
-
+        """Request goal criteria generation."""
+        import uuid
+        request = {
+            "kind": "create",
+            "request_id": str(uuid.uuid4()),
+            "objective": objective,
+        }
+        await ctx.app._run_goal_criteria_request(request)
         return CommandResult(
             success=True,
-            message=(
-                f"🎯 **Goal set:** {objective}\n\n"
-                f"**Acceptance Criteria:**\n{rubric}\n\n"
-                "_(Auto-accepted — use `/rubric set <criteria>` to modify.)_"
-            ),
+            message=None,
+            mount_as_app_message=False,
         )
 
     async def _amend(
         self, ctx: CommandContext, state: GoalState, feedback: str
     ) -> CommandResult:
-        """Regenerate criteria incorporating user feedback.
-
-        Reference: app.py L10626-L10657.
-        """
-        state.pending_kind = "amend"
-
-        try:
-            rubric = await asyncio.to_thread(
-                _generate_rubric,
-                state.objective or "",
-                model_spec=ctx.model_spec,
-                feedback=feedback,
-                previous_criteria=state.rubric,
-            )
-        except Exception as exc:
-            return CommandResult(
-                success=False,
-                message=f"Amendment failed: {exc}",
-            )
-
-        state.pending_rubric = rubric
-
-        # Push review screen
-        app = ctx.app
-        if app is not None and hasattr(app, "_open_goal_review"):
-            try:
-                app._open_goal_review(state.objective or "", rubric)
-                return CommandResult(
-                    success=True,
-                    message=None,
-                    mount_as_app_message=False,
-                )
-            except Exception:
-                pass
-
-        # Fallback: auto-accept
-        state.rubric = rubric
-        state.pending_rubric = None
-        state.pending_kind = None
-
+        """Request goal criteria amendment."""
+        import uuid
+        request = {
+            "kind": "amend",
+            "request_id": str(uuid.uuid4()),
+            "objective": state.objective or "",
+            "criteria": state.rubric or "",
+            "feedback": feedback,
+        }
+        await ctx.app._run_goal_criteria_request(request)
         return CommandResult(
             success=True,
-            message=f"**Amended Criteria:**\n{rubric}\n\n_(Auto-accepted)_",
+            message=None,
+            mount_as_app_message=False,
         )
 
     @staticmethod

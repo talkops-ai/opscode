@@ -83,6 +83,11 @@ def discover_plugins() -> list[DCoderPlugin]:
     return plugins
 
 
+from dcoder.plugins.commands_cli import (
+    execute_plugin_command,
+    setup_plugin_parser,
+)
+
 __all__ = [
     "DCoderPlugin",
     "PluginDiscoveryResult",
@@ -92,10 +97,12 @@ __all__ = [
     "add_marketplace_source",
     "discover_marketplace_plugins",
     "discover_plugins",
+    "execute_plugin_command",
     "install_plugin",
     "list_available_plugins",
     "list_installed_plugin_ids",
     "remove_marketplace",
     "set_installed_plugin_enabled",
+    "setup_plugin_parser",
     "uninstall_plugin",
 ]

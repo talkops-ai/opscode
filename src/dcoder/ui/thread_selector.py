@@ -258,7 +258,8 @@ class ThreadSelectorScreen(ModalScreen[str | None]):
     async def _delete_thread_async(self, thread_id: str) -> None:
         try:
             from dcoder.state.session import SessionManager
-            db_path = Path.home() / ".dcoder" / ".state" / "sessions.db"
+            from dcoder.state.session import get_db_path
+            db_path = get_db_path()
             if db_path.exists():
                 sm = SessionManager(db_path)
                 await sm.delete_thread(thread_id)

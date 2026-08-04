@@ -1,8 +1,10 @@
 """Stream bridge between LangGraph SDK client and Textual widgets.
 
 The ``TextualAdapter`` consumes streaming events from ``client.runs.stream()``
-and routes them to the main application and widgets using thread-safe Textual
-events.
+and routes them directly to Textual widgets via widget mutation.  Only
+lifecycle events (interrupts, subagents, stream end/error) use the Textual
+message bus.  High-frequency token and tool updates bypass ``post_message``
+to avoid flooding the event queue.
 """
 
 from __future__ import annotations
@@ -10,12 +12,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
 
-from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from textual.message import Message
+
+from dcoder.utils.session_stats import SessionStats
+from dcoder.ui._tool_stream import (
+    ToolCallBuffer,
+    ToolCallBufferKey,
+    tool_call_buffer_key,
+    count_unemitted_tool_calls,
+)
 
 if TYPE_CHECKING:
     from dcoder.ui.messages import MessageList
@@ -156,34 +164,6 @@ def _extract_text(
     return text
 
 
-class ToolLifecycleState(Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCESS = "success"
-    ERROR = "error"
-
-
-@dataclass
-class ToolState:
-    call_id: str
-    name: str
-    args: dict[str, Any]
-    state: ToolLifecycleState = ToolLifecycleState.PENDING
-    result: Any = None
-    error: str | None = None
-
-
-@dataclass
-class SessionStats:
-    """Accumulated stats for the current session."""
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    request_count: int = 0
-    model: str = ""
-    tool_calls: int = 0
-    elapsed_seconds: float = 0.0
-
 
 class TextualAdapter:
     """Bridge between LangGraph SDK stream events and Textual widgets.
@@ -193,27 +173,11 @@ class TextualAdapter:
     """
 
     # ── Custom Textual Events ────────────────────────────
-
-    class TokenStreamed(Message):
-        def __init__(self, token: str) -> None:
-            super().__init__()
-            self.token = token
-
-    class ToolCallStarted(Message):
-        def __init__(self, name: str, call_id: str, args: dict[str, Any]) -> None:
-            super().__init__()
-            self.name = name
-            self.call_id = call_id
-            self.args = args
-
-    class ToolCallCompleted(Message):
-        def __init__(
-            self, call_id: str, result: Any, status: ToolLifecycleState
-        ) -> None:
-            super().__init__()
-            self.call_id = call_id
-            self.result = result
-            self.status = status
+    # Only events that require app-level handling (lifecycle, approvals,
+    # subagents) use the Textual message bus.  High-frequency token and
+    # tool-call updates bypass post_message entirely and mutate widgets
+    # directly from the stream loop — matching the reference dcode pattern
+    # — to avoid flooding the event queue.
 
     class InterruptRaised(Message):
         def __init__(
@@ -236,11 +200,32 @@ class TextualAdapter:
             self.task = task
 
     class SubagentUpdate(Message):
-        def __init__(self, agent_name: str, token: str, status: str = "running") -> None:
+        def __init__(self, agent_name: str, token: str, status: str = "") -> None:
             super().__init__()
             self.agent_name = agent_name
             self.token = token
             self.status = status
+
+    class TokenStreamed(Message):
+        """Fired when a new content token is streamed from the model."""
+        def __init__(self, token: str) -> None:
+            super().__init__()
+            self.token = token
+
+    class ToolCallStarted(Message):
+        """Fired when a tool call begins execution."""
+        def __init__(self, name: str, call_id: str = "") -> None:
+            super().__init__()
+            self.name = name
+            self.call_id = call_id
+
+    class ToolCallCompleted(Message):
+        """Fired when a tool call finishes."""
+        def __init__(self, name: str, call_id: str = "", result: str = "") -> None:
+            super().__init__()
+            self.name = name
+            self.call_id = call_id
+            self.result = result
 
     class StreamFinished(Message):
         def __init__(self, stats: SessionStats) -> None:
@@ -262,6 +247,7 @@ class TextualAdapter:
         auto_approve: bool = False,
         set_spinner: Any = None,
         app: Any = None,
+        prompt_manager: Any = None,
     ) -> None:
         self._client = client
         self._assistant_id = assistant_id
@@ -270,9 +256,9 @@ class TextualAdapter:
         self._auto_approve = auto_approve
         self._set_spinner = set_spinner
         self._app = app
+        self._prompt_manager = prompt_manager
         self._stats = SessionStats()
         self._cancel_event = asyncio.Event()
-        self._active_tools: dict[str, ToolState] = {}
         self._active_tools_map: dict[str, str] = {}
         self._approval_events: dict[str, asyncio.Event] = {}
         self._approval_responses: dict[str, bool] = {}
@@ -302,74 +288,130 @@ class TextualAdapter:
         *,
         thread_id: str,
         context: dict[str, Any] | None = None,
+        graph_input: dict[str, Any] | None = None,
     ) -> None:
         """Run one agent turn, routing stream events to Textual widgets."""
         from langchain_core.messages import AIMessageChunk, ToolMessage
 
         self._cancel_event.clear()
-        self._active_tools.clear()
         self._active_tools_map.clear()
 
-        if self._status_bar is not None:
-            self._status_bar.set_status("Thinking...")
+        # Show the LoadingWidget spinner before streaming starts (matching
+        # reference dcode).  The status bar's set_status("Thinking...") was
+        # hardcoded and got stuck for non-reasoning models; the spinner
+        # widget gives a proper animated indicator with elapsed time.
         if self._set_spinner:
-            await self._set_spinner("Thinking")
+            try:
+                await self._set_spinner("Thinking")
+            except Exception:
+                pass
+        from langchain_core.messages import HumanMessage
+        from dcoder.middleware.auto_mode import USER_PROMPT_METADATA_KEY, user_prompt_metadata
 
-        input_msg: dict[str, Any] = {"messages": [{"role": "user", "content": prompt}]}
+        if graph_input is not None:
+            input_msg: dict[str, Any] = graph_input
+        else:
+            human_msg = HumanMessage(
+                content=prompt,
+                additional_kwargs={
+                    USER_PROMPT_METADATA_KEY: user_prompt_metadata(
+                        literal_user_text=prompt,
+                    )
+                },
+            )
+            input_msg = {"messages": [human_msg]}
 
-        if self._app is not None:
-            from dcoder.commands.power.goal import get_goal_state, GoalHandler
-            goal_state = get_goal_state(self._app)
-            if goal_state.is_actionable and goal_state.objective:
-                input_msg["_goal_objective"] = goal_state.objective
-                input_msg["_goal_rubric"] = goal_state.rubric
-                input_msg["_goal_status"] = goal_state.status
-                if goal_state.rubric:
+            if self._app is not None:
+                from dcoder.commands.power.goal import get_goal_state, GoalHandler
+                goal_state = get_goal_state(self._app)
+                if goal_state.is_actionable and goal_state.objective:
+                    input_msg["_goal_objective"] = goal_state.objective
+                    input_msg["_goal_rubric"] = goal_state.rubric
+                    input_msg["_goal_status"] = goal_state.status
+                    if goal_state.rubric:
+                        input_msg["rubric"] = goal_state.rubric
+                elif goal_state.next_rubric:
+                    input_msg["rubric"] = goal_state.next_rubric
+                    goal_state.next_rubric = None  # One-turn quality gate
+                    GoalHandler._sync_status_rubric(self._app, goal_state)
+                elif goal_state.rubric:
+                    input_msg["_sticky_rubric"] = goal_state.rubric
                     input_msg["rubric"] = goal_state.rubric
-            elif goal_state.next_rubric:
-                input_msg["rubric"] = goal_state.next_rubric
-                goal_state.next_rubric = None  # One-turn quality gate
-                GoalHandler._sync_status_rubric(self._app, goal_state)
-            elif goal_state.rubric:
-                input_msg["_sticky_rubric"] = goal_state.rubric
-                input_msg["rubric"] = goal_state.rubric
         config = {"configurable": {"thread_id": thread_id}}
         logger.debug("TUI: stream_turn start, thread_id: %s, context: %s", thread_id, context)
 
         start_t = time.time()
         self._stats.input_tokens += max(1, len(prompt) // 4)
         if self._status_bar is not None:
-            self._status_bar.update_stats(self._stats)
+            total_tokens = self._stats.input_tokens + self._stats.output_tokens
+            self._status_bar.set_tokens(total_tokens)
 
-        current_thinking_widget: Any | None = None
         thinking_start_t: float | None = None
-        accumulated_thinking = ""
+
+
+        first_token_received = False
 
         try:
-            if self._messages is not None:
-                self._messages.start_assistant_message()
+            stream_input: Any = input_msg
+            
+            # Map tracking active assistant messages and pending text by namespace
+            assistant_message_by_namespace: dict[tuple, Any] = {}
+            pending_text_by_namespace: dict[tuple, str] = {}
+            
+            # Buffers for tool call streaming
+            tool_call_buffers: dict[ToolCallBufferKey, ToolCallBuffer] = {}
+            displayed_tool_ids: set[str] = set()
 
-            logger.debug("TUI: calling agent.astream...")
+            while True:
+                logger.debug("TUI: calling agent.astream...")
 
-            async for chunk in self._client.astream(
-                input_msg,
-                stream_mode=["messages", "updates", "custom"],
-                subgraphs=True,
-                config=config,
-                context=context,
-            ):
-                if self._cancel_event.is_set():
-                    logger.debug("TUI: cancel event is set, breaking stream loop")
-                    break
+                interrupt_occurred = False
+                resume_payload: dict[str, Any] = {}
 
-                if not isinstance(chunk, tuple) or len(chunk) != 3:
-                    continue
+                # Show the Thinking spinner before each astream iteration
+                if self._set_spinner and not getattr(self, "_current_tool_messages", {}):
+                    await self._set_spinner("Thinking")
 
-                namespace, mode, data = chunk
+                async for chunk in self._client.astream(
+                    stream_input,
+                    stream_mode=["messages", "updates", "custom"],
+                    subgraphs=True,
+                    config=config,
+                    context=context,
+                ):
+                    if self._cancel_event.is_set():
+                        logger.debug("TUI: cancel event is set, breaking stream loop")
+                        break
 
-                if mode == "messages":
-                    msg_obj, meta = data if isinstance(data, tuple) else (data, {})
-                    if isinstance(msg_obj, AIMessageChunk):
+                    if not isinstance(chunk, tuple) or len(chunk) != 3:
+                        continue
+
+                    namespace, current_stream_mode, data = chunk
+                    ns_key = tuple(namespace) if namespace else ()
+                    is_main_agent = ns_key == ()
+
+                    if current_stream_mode == "custom":
+                        # We don't handle rubric messages natively in dcoder yet,
+                        # but we safely ignore custom mode to avoid breaking
+                        pass
+
+                    elif current_stream_mode == "updates":
+                        interrupts = data.get("__interrupt__")
+                        if interrupts:
+                            interrupt_occurred = True
+                            if not isinstance(interrupts, tuple):
+                                interrupts = (interrupts,)
+                            for interrupt in interrupts:
+                                interrupt_id = interrupt.get("interrupt_id")
+                                interrupt_val = interrupt.get("interrupt_value")
+                                if interrupt_val and interrupt_id:
+                                    logger.debug("TUI: Handle interrupt %s: %s", interrupt_id, interrupt_val)
+                                    resume_payload[interrupt_id] = None
+                                    
+                    elif current_stream_mode == "messages":
+                        msg_obj, meta = data if isinstance(data, tuple) else (data, {})
+                        
+                        # Handle usage stats
                         usage_meta = (
                             getattr(msg_obj, "usage_metadata", None)
                             or (getattr(msg_obj, "response_metadata", None) or {}).get("usage")
@@ -388,113 +430,96 @@ class TextualAdapter:
                                 if self._app:
                                     setattr(self._app, "_context_tokens", context_toks)
                                 if self._status_bar is not None:
-                                    self._status_bar.update_stats(self._stats)
+                                    self._status_bar.set_tokens(context_toks)
 
-                        text, thinking_text = _extract_text_and_thinking(
-                            msg_obj.content,
-                            getattr(msg_obj, "additional_kwargs", None),
-                            getattr(msg_obj, "response_metadata", None),
-                            msg_obj=msg_obj,
-                        )
-
-                        if thinking_text:
-                            if current_thinking_widget is None:
-                                thinking_start_t = time.time()
-                                if self._messages is not None:
-                                    current_thinking_widget = self._messages.add_thinking_message()
-                            accumulated_thinking += thinking_text
-                            if current_thinking_widget and thinking_start_t is not None:
-                                dur = time.time() - thinking_start_t
-                                current_thinking_widget.update_thinking(accumulated_thinking, duration_seconds=dur)
-
-                        if text:
-                            if current_thinking_widget is not None and thinking_start_t is not None:
-                                dur = time.time() - thinking_start_t
-                                current_thinking_widget.update_thinking(accumulated_thinking, duration_seconds=dur)
-                                current_thinking_widget = None
-                                thinking_start_t = None
-                                accumulated_thinking = ""
-
+                        if msg_obj.__class__.__name__ == "ToolMessage":
+                            call_id = getattr(msg_obj, "tool_call_id", "") or ""
+                            raw_name = getattr(msg_obj, "name", "") or ""
+                            tool_name = raw_name if (raw_name and raw_name != "None") else self._active_tools_map.get(call_id, "tool")
+                            content = str(getattr(msg_obj, "content", ""))
                             if self._messages is not None:
-                                self._messages.append_assistant_token(text)
-                            if self._app:
-                                self._app.post_message(self.TokenStreamed(text))
+                                self._messages.update_tool_result(call_id=call_id, result=content, name=tool_name)
+                            if self._set_spinner:
+                                try:
+                                    await self._set_spinner("Thinking")
+                                except Exception:
+                                    pass
 
-                        tool_calls = getattr(msg_obj, "tool_calls", []) or []
-                        if tool_calls:
-                            if current_thinking_widget is not None and thinking_start_t is not None:
-                                dur = time.time() - thinking_start_t
-                                current_thinking_widget.update_thinking(accumulated_thinking, duration_seconds=dur)
-                                current_thinking_widget = None
-                                thinking_start_t = None
-                                accumulated_thinking = ""
+                        # Process AIMessageChunk blocks
+                        elif hasattr(msg_obj, "content_blocks"):
+                            blocks = msg_obj.content_blocks
+                            for block in blocks:
+                                block_type = block.get("type")
+                                
+                                if block_type == "text":
+                                    text = block.get("text", "")
+                                    if text:
+                                        pending_text = pending_text_by_namespace.get(ns_key, "")
+                                        pending_text += text
+                                        pending_text_by_namespace[ns_key] = pending_text
+                                        # Track that this namespace has an active assistant
+                                        # for tool-call boundary clearing.
+                                        if ns_key not in assistant_message_by_namespace:
+                                            assistant_message_by_namespace[ns_key] = True
+                                            if self._set_spinner:
+                                                await self._set_spinner("Thinking")
 
-                            if self._messages is not None:
-                                self._messages.finish_assistant_message()
-                        for tc in tool_calls:
-                            call_id = tc.get("id", "") or ""
-                            raw_name = tc.get("name") or ""
-                            name = raw_name if (raw_name and raw_name != "None") else "tool"
-                            args = tc.get("args", {}) or {}
-                            if call_id:
-                                self._active_tools_map[call_id] = name
-                            self._stats.tool_calls += 1
-                            if self._messages is not None:
-                                self._messages.add_tool_call(name=name, call_id=call_id, args=args)
-                            if self._app:
-                                self._app.post_message(self.ToolCallStarted(name, call_id, args))
+                                        if self._messages is not None:
+                                            self._messages.append_assistant_token(text)
+                                            
+                                elif block_type in {"tool_call_chunk", "tool_call"}:
+                                    chunk_name = block.get("name")
+                                    chunk_args = block.get("args")
+                                    chunk_id = block.get("id")
+                                    chunk_index = block.get("index")
+                                    
+                                    buffer_key = tool_call_buffer_key(chunk_index, chunk_id, len(tool_call_buffers))
+                                    buffer = tool_call_buffers.setdefault(buffer_key, ToolCallBuffer())
+                                    buffer.ingest(name=chunk_name, tool_id=chunk_id, args=chunk_args)
+                                    
+                                    buffer_name = buffer.name
+                                    buffer_id = buffer.tool_id
+                                    if buffer_name is None:
+                                        continue
+                                        
+                                    parsed_args = buffer.parse_args()
+                                    if parsed_args is None:
+                                        continue
+                                        
+                                    if self._messages is not None:
+                                        self._messages.finish_assistant_message()
+                                    # Clear namespace tracking so post-tool text starts
+                                    # a fresh assistant bubble (matching reference).
+                                    pending_text_by_namespace.pop(ns_key, None)
+                                    assistant_message_by_namespace.pop(ns_key, None)
+                                        
+                                    if buffer_id is not None and buffer_id not in displayed_tool_ids:
+                                        displayed_tool_ids.add(buffer_id)
+                                        if self._set_spinner:
+                                            await self._set_spinner("Thinking")
+                                        
+                                        if self._messages is not None:
+                                            self._messages.add_tool_call(name=buffer_name, call_id=buffer_id, args=parsed_args)
+                                            self._active_tools_map[buffer_id] = buffer_name
 
-                    elif isinstance(msg_obj, ToolMessage):
-                        call_id = getattr(msg_obj, "tool_call_id", "") or ""
-                        raw_name = getattr(msg_obj, "name", "") or ""
-                        tool_name = raw_name if (raw_name and raw_name != "None") else self._active_tools_map.get(call_id, "tool")
-                        content = str(getattr(msg_obj, "content", ""))
-                        if self._messages is not None:
-                            self._messages.update_tool_result(call_id=call_id, result=content, name=tool_name)
-                        if self._app:
-                            self._app.post_message(
-                                self.ToolCallCompleted(call_id, content, ToolLifecycleState.SUCCESS)
-                            )
+                if self._cancel_event.is_set():
+                    break
 
-                elif mode == "updates" and isinstance(data, dict):
-                    if self._app:
-                        from dcoder.commands.power.goal import get_goal_state, GoalHandler
-                        goal_state = get_goal_state(self._app)
-                        for node_name, node_update in data.items():
-                            if isinstance(node_update, dict):
-                                new_status = node_update.get("_goal_status")
-                                new_note = node_update.get("_goal_status_note")
-                                pending_comp = node_update.get("_pending_goal_completion_note")
-                                updated = False
-                                if new_status:
-                                    goal_state.status = new_status
-                                    updated = True
-                                if new_note:
-                                    goal_state.status_note = new_note
-                                    updated = True
-                                if pending_comp:
-                                    goal_state.status_note = pending_comp
-                                    updated = True
-                                if updated:
-                                    GoalHandler._sync_status_rubric(self._app, goal_state)
-
-                    interrupts = data.get("__interrupt__", [])
-                    if interrupts:
-                        for intr in interrupts:
-                            call_id = getattr(intr, "id", "") or "call_1"
-                            tool_name = "action"
-                            if self._app:
-                                self._app.post_message(self.InterruptRaised(tool_name, call_id, {}))
-                            approved = await self._await_approval(call_id)
-                            logger.debug("TUI: approval response for %s: %s", call_id, approved)
-
-            logger.debug("TUI: stream loop complete, finishing assistant message")
-            if self._messages is not None:
-                self._messages.finish_assistant_message()
+                logger.debug("TUI: stream loop complete, finishing assistant message")
+                if self._messages is not None:
+                    self._messages.finish_assistant_message()
+                    
+                if interrupt_occurred and resume_payload:
+                    from langgraph.types import Command
+                    stream_input = Command(resume=resume_payload)
+                    continue
+                else:
+                    break
 
             self._stats.request_count += 1
             if self._status_bar is not None:
-                self._status_bar.update_stats(self._stats)
+                total_tokens = self._stats.input_tokens + self._stats.output_tokens
+                self._status_bar.set_tokens(total_tokens)
             if self._app:
                 self._app.post_message(self.StreamFinished(self._stats))
 
@@ -512,14 +537,15 @@ class TextualAdapter:
             raise
 
         finally:
-            self._stats.elapsed_seconds += time.time() - start_t
-            if self._status_bar is not None:
-                self._status_bar.set_status("Ready")
+            self._stats.wall_time_seconds += time.time() - start_t
+            # Dismiss the spinner and clear the status bar on turn end.
             if self._set_spinner:
                 try:
                     await self._set_spinner(None)
                 except Exception:
                     pass
+            if self._status_bar is not None:
+                self._status_bar.set_status("")
             logger.debug("TUI: stream_turn finally complete")
 
 
@@ -533,144 +559,6 @@ class TextualAdapter:
         event = self._approval_events.get(call_id)
         if event:
             event.set()
-
-    # ── Event Routing ───────────────────────────────────
-
-    async def _route_event(self, chunk: Any, thread_id: str) -> None:
-        """Route a single stream chunk to event handlers."""
-        event_type = chunk.event
-        data = chunk.data
-
-        if event_type == "messages/partial":
-            for msg in data if isinstance(data, list) else [data]:
-                if msg.get("type") == "ai" and msg.get("content"):
-                    text = _extract_text(msg["content"])
-                    if text:
-                        self._stats.output_tokens += max(1, len(text) // 4)
-                        if self._status_bar is not None:
-                            self._status_bar.update_stats(self._stats)
-                        if self._messages is not None:
-                            self._messages.append_assistant_token(text)
-                        if self._app:
-                            self._app.post_message(self.TokenStreamed(text))
-
-        elif event_type == "messages/complete":
-            for msg in data if isinstance(data, list) else [data]:
-                msg_type = msg.get("type")
-
-                usage_meta = msg.get("usage_metadata") or msg.get("response_metadata", {}).get("usage") or msg.get("response_metadata", {}).get("token_usage")
-                if isinstance(usage_meta, dict):
-                    inp = usage_meta.get("input_tokens") or usage_meta.get("prompt_tokens") or 0
-                    out = usage_meta.get("output_tokens") or usage_meta.get("completion_tokens") or 0
-                    if inp > 0:
-                        self._stats.input_tokens = max(self._stats.input_tokens, inp)
-                    if out > 0:
-                        self._stats.output_tokens = max(self._stats.output_tokens, out)
-                    if self._status_bar is not None:
-                        self._status_bar.update_stats(self._stats)
-
-                if msg_type == "ai":
-                    tool_calls = msg.get("tool_calls", [])
-                    for tc in tool_calls:
-                        call_id = tc.get("id", "")
-                        name = tc.get("name", "unknown")
-                        args = tc.get("args", {})
-
-                        self._stats.tool_calls += 1
-                        tool_state = ToolState(
-                            call_id=call_id,
-                            name=name,
-                            args=args,
-                            state=ToolLifecycleState.RUNNING,
-                        )
-                        self._active_tools[call_id] = tool_state
-
-                        if self._messages is not None:
-                            self._messages.add_tool_call(
-                                name=name,
-                                call_id=call_id,
-                                args=args,
-                            )
-                        if self._app:
-                            self._app.post_message(
-                                self.ToolCallStarted(name, call_id, args)
-                            )
-
-                elif msg_type == "tool":
-                    call_id = msg.get("tool_call_id", "")
-                    content = msg.get("content", "")
-                    status = (
-                        ToolLifecycleState.ERROR
-                        if msg.get("status") == "error"
-                        else ToolLifecycleState.SUCCESS
-                    )
-
-                    if call_id in self._active_tools:
-                        self._active_tools[call_id].state = status
-                        self._active_tools[call_id].result = content
-
-                    if self._messages is not None:
-                        self._messages.update_tool_result(
-                            call_id=call_id,
-                            result=content,
-                        )
-                    if self._app:
-                        self._app.post_message(
-                            self.ToolCallCompleted(call_id, content, status)
-                        )
-
-        elif event_type == "__interrupt__":
-            # HITL Interrupt raised
-            interrupts = data if isinstance(data, list) else [data]
-            for intr in interrupts:
-                call_id = intr.get("id", "")
-                tool_name = intr.get("tool", "unknown")
-                args = intr.get("args", {})
-
-                if self._app:
-                    self._app.post_message(
-                        self.InterruptRaised(tool_name, call_id, args)
-                    )
-
-                # Wait for approval response
-                approved = await self._await_approval(call_id)
-                logger.debug(
-                    "TUI: approval response for %s: %s", call_id, approved
-                )
-
-        elif event_type == "events":
-            if isinstance(data, dict):
-                usage = data.get("usage", {})
-                if usage:
-                    self._stats.input_tokens += usage.get("prompt_tokens", 0)
-                    self._stats.output_tokens += usage.get("completion_tokens", 0)
-                model = data.get("model")
-                if model:
-                    self._stats.model = model
-
-                # Subagent routing
-                subagent = data.get("subagent")
-                if subagent:
-                    agent_name = subagent.get("name", "subagent")
-                    token = subagent.get("token", "")
-                    task = subagent.get("task", "")
-                    action = subagent.get("action", "update")
-
-                    if action == "spawn" and self._app:
-                        self._app.post_message(
-                            self.SubagentSpawned(agent_name, task)
-                        )
-                    elif action == "update" and self._app:
-                        self._app.post_message(
-                            self.SubagentUpdate(agent_name, token)
-                        )
-
-        elif event_type == "error":
-            err_msg = data.get("message") or data.get("error") or "Unknown error"
-            if self._messages is not None:
-                self._messages.add_error_message(f"Server Error: {err_msg}")
-            if self._app:
-                self._app.post_message(self.StreamError(err_msg))
 
     async def _await_approval(self, call_id: str) -> bool:
         """Pause stream loop until approval event resolves."""

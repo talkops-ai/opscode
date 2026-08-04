@@ -23,12 +23,8 @@ _MANIFEST_RELATIVE_PATHS = (
     Path(".codex-plugin") / "plugin.json",
     Path("plugin.json"),
 )
-_PATH_COMPONENT_FIELDS = {"skills", "mcpServers"}
-_UNSUPPORTED_COMPONENT_DIRS: tuple[UnsupportedComponent, ...] = (
-    "agents",
-    "commands",
-    "hooks",
-)
+_PATH_COMPONENT_FIELDS = {"skills", "mcpServers", "agents", "commands"}
+_UNSUPPORTED_COMPONENT_DIRS: tuple[UnsupportedComponent, ...] = ("hooks",)
 _NAME_RE = re.compile(r"^[^\s]+$")
 
 
@@ -240,6 +236,12 @@ def build_inventory(
     )
     skills = (*default_skills, *metadata_paths.get("skills", ()), *root_skill)
 
+    default_agents = _existing_component_path(plugin_root / "agents", plugin_root)
+    agents = (*default_agents, *metadata_paths.get("agents", ()))
+
+    default_commands = _existing_component_path(plugin_root / "commands", plugin_root)
+    commands = (*default_commands, *metadata_paths.get("commands", ()))
+
     mcp_files = (
         *_existing_component_path(plugin_root / ".mcp.json", plugin_root),
         *metadata_paths.get("mcpServers", ()),
@@ -250,6 +252,8 @@ def build_inventory(
     return ComponentInventory(
         skills=tuple(dict.fromkeys(skills)),
         mcp_files=tuple(dict.fromkeys(mcp_files)),
+        agents=tuple(dict.fromkeys(agents)),
+        commands=tuple(dict.fromkeys(commands)),
         unsupported=unsupported,
         warnings=tuple(warnings),
     )

@@ -13,7 +13,7 @@ JsonValue = Any
 
 MarketplaceSourceType = Literal["directory", "file", "github", "git", "url"]
 ExternalPluginRepositorySourceType = Literal["github", "git-subdir", "url"]
-UnsupportedComponent = Literal["agents", "commands", "hooks"]
+UnsupportedComponent = Literal["hooks"]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -63,6 +63,8 @@ class ComponentInventory:
 
     skills: tuple[Path, ...] = ()
     mcp_files: tuple[Path, ...] = ()
+    agents: tuple[Path, ...] = ()
+    commands: tuple[Path, ...] = ()
     unsupported: tuple[UnsupportedComponent, ...] = ()
     warnings: tuple[str, ...] = ()
 

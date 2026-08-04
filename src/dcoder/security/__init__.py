@@ -19,9 +19,11 @@ from dcoder.security.url_validation import (
 )
 from dcoder.security.approval_mode import (
     APPROVAL_MODE_NAMESPACE,
+    ApprovalMode,
     ApprovalModePayload,
     approval_mode_key,
     approval_mode_payload,
+    coerce_approval_mode,
     read_approval_mode_from_store,
     awrite_approval_mode,
 )
@@ -45,16 +47,18 @@ __all__ = [
     "check_url_safety",
     "iter_string_values",
     "looks_like_url_key",
-    
+
     "_UrlValidationError",
     "_is_blocked_ip",
     "_validate_url",
     "_pinned_dns",
-    
+
     "APPROVAL_MODE_NAMESPACE",
+    "ApprovalMode",
     "ApprovalModePayload",
     "approval_mode_key",
     "approval_mode_payload",
+    "coerce_approval_mode",
     "read_approval_mode_from_store",
     "awrite_approval_mode",
     

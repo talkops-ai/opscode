@@ -39,10 +39,11 @@ class PluginStateError(OSError):
 
 def plugin_storage_root() -> Path:
     """Return the plugin storage root directory."""
-    raw = os.environ.get("DCODER_PLUGIN_DIR")
+    from dcoder.config.paths import PLUGINS_DIR
+    raw = os.environ.get("DCODER_PLUGIN_DIR") or os.environ.get("PLUGIN_CACHE_DIR")
     if raw:
         return Path(raw).expanduser()
-    return Path.home() / ".dcoder" / "plugins"
+    return PLUGINS_DIR
 
 
 def plugin_data_dir(plugin_id: str) -> Path:
@@ -100,19 +101,23 @@ def versioned_cache_path(plugin_id: str, version: str | None) -> Path:
 
 
 def _state_dir() -> Path:
-    return Path.home() / ".dcoder"
+    from dcoder.config.paths import STATE_DIR
+    return STATE_DIR
 
 
 def _marketplaces_path() -> Path:
-    return _state_dir() / "plugin_marketplaces.json"
+    from dcoder.config.paths import PLUGIN_MARKETPLACES_PATH
+    return PLUGIN_MARKETPLACES_PATH
 
 
 def _plugin_state_path() -> Path:
-    return _state_dir() / "plugin_state.json"
+    from dcoder.config.paths import PLUGIN_STATE_PATH
+    return PLUGIN_STATE_PATH
 
 
 def _installed_plugins_path() -> Path:
-    return _state_dir() / "installed_plugins.json"
+    from dcoder.config.paths import PLUGIN_INSTALLED_PATH
+    return PLUGIN_INSTALLED_PATH
 
 
 def _invalid_state(

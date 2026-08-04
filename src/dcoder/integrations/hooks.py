@@ -101,7 +101,8 @@ _loaded = False
 
 def _default_hooks_path() -> Path:
     """Return ``~/.dcoder/hooks.json``."""
-    return Path.home() / ".dcoder" / "hooks.json"
+    from dcoder.config.paths import HOOKS_PATH
+    return HOOKS_PATH
 
 
 def load_hooks(path: Path | None = None) -> list[HookConfig]:
@@ -115,39 +116,53 @@ def load_hooks(path: Path | None = None) -> list[HookConfig]:
     """
     global _hooks, _loaded  # noqa: PLW0603
 
-    hooks_file = path or _default_hooks_path()
-    if not hooks_file.is_file():
-        _hooks = []
-        _loaded = True
-        return _hooks
-
-    try:
-        data = json.loads(hooks_file.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to parse hooks config %s: %s", hooks_file, exc)
-        _hooks = []
-        _loaded = True
-        return _hooks
-
     parsed: list[HookConfig] = []
-    for entry in data.get("hooks", []):
-        cmd = entry.get("command")
-        if not isinstance(cmd, list) or not cmd:
-            logger.warning("Skipping hook with invalid command: %r", entry)
-            continue
-        events_raw = entry.get("events", [])
-        if not isinstance(events_raw, list):
-            events_raw = []
-        parsed.append(
-            HookConfig(
-                command=cmd,
-                events=frozenset(events_raw),
+
+    def _parse_hooks_data(data: dict[str, Any], source_name: str) -> None:
+        for entry in data.get("hooks", []):
+            cmd = entry.get("command")
+            if not isinstance(cmd, list) or not cmd:
+                logger.warning("Skipping hook with invalid command from %s: %r", source_name, entry)
+                continue
+            events_raw = entry.get("events", [])
+            if not isinstance(events_raw, list):
+                events_raw = []
+            parsed.append(
+                HookConfig(
+                    command=cmd,
+                    events=frozenset(events_raw),
+                )
             )
-        )
+
+    hooks_file = path or _default_hooks_path()
+    if hooks_file.is_file():
+        try:
+            data = json.loads(hooks_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                _parse_hooks_data(data, str(hooks_file))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to parse hooks config %s: %s", hooks_file, exc)
+
+    # Discover and merge plugin hooks
+    try:
+        from dcoder.plugins.discovery import discover_plugins
+
+        plugins = discover_plugins().plugins
+        for plugin in plugins:
+            plugin_hooks_file = plugin.root / "hooks" / "hooks.json"
+            if plugin_hooks_file.is_file():
+                try:
+                    p_data = json.loads(plugin_hooks_file.read_text(encoding="utf-8"))
+                    if isinstance(p_data, dict):
+                        _parse_hooks_data(p_data, f"plugin:{plugin.plugin_id}")
+                except (json.JSONDecodeError, OSError) as exc:
+                    logger.warning("Failed to parse plugin hooks config %s: %s", plugin_hooks_file, exc)
+    except Exception as exc:
+        logger.debug("Plugin hook discovery skipped: %s", exc)
 
     _hooks = parsed
     _loaded = True
-    logger.debug("Loaded %d hooks from %s", len(_hooks), hooks_file)
+    logger.debug("Loaded %d total hooks", len(_hooks))
     return _hooks
 
 

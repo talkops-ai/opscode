@@ -96,9 +96,10 @@ class ServerConfig:
     enable_ask_user: bool = False
     enable_memory: bool = True
     enable_skills: bool = True
-    enable_interpreter: bool = False
-    interpreter_ptc: str | list[str] | None = None
+    enable_interpreter: bool = True
+    interpreter_ptc: str | list[str] | None = "safe"
     interpreter_ptc_acknowledge_unsafe: bool = False
+    user_langchain_project: str | None = "dcoder"
     rubric_model: str | None = None
     rubric_max_iterations: int | None = None
     sandbox_type: str | None = None
@@ -194,11 +195,16 @@ class ServerConfig:
             enable_ask_user=_read_env_bool("ENABLE_ASK_USER"),
             enable_memory=_read_env_bool("ENABLE_MEMORY", default=True),
             enable_skills=_read_env_bool("ENABLE_SKILLS", default=True),
-            enable_interpreter=_read_env_bool("ENABLE_INTERPRETER"),
-            interpreter_ptc=_read_env_json("INTERPRETER_PTC"),
+            enable_interpreter=_read_env_bool("ENABLE_INTERPRETER", default=True),
+            interpreter_ptc=(
+                _read_env_json("INTERPRETER_PTC") 
+                if _read_env_json("INTERPRETER_PTC") is not None 
+                else "safe"
+            ),
             interpreter_ptc_acknowledge_unsafe=_read_env_bool(
                 "INTERPRETER_PTC_ACKNOWLEDGE_UNSAFE"
             ),
+            user_langchain_project=_read_env_str("USER_LANGCHAIN_PROJECT") or "dcoder",
             rubric_model=_read_env_str("RUBRIC_MODEL") or None,
             rubric_max_iterations=_read_env_int("RUBRIC_MAX_ITERATIONS", default=None),
             sandbox_type=_read_env_str("SANDBOX_TYPE"),
@@ -225,8 +231,14 @@ class ServerConfig:
         no_mcp: bool = False,
         trust_project_mcp: bool | None = None,
         interactive: bool = True,
+        cwd: str | Path | None = None,
     ) -> ServerConfig:
         """Build a ServerConfig from CLI-provided arguments."""
+        from dcoder.project_utils import ProjectContext
+
+        user_cwd = Path(cwd).expanduser().resolve() if cwd is not None else Path.cwd()
+        project_context = ProjectContext.from_user_cwd(user_cwd)
+
         # Resolve MCP config path if provided
         normalized_mcp: str | None = None
         if mcp_config_path:
@@ -242,6 +254,8 @@ class ServerConfig:
             auto_approve=auto_approve,
             shell_allow_list=shell_allow_list,
             interactive=interactive,
+            cwd=str(project_context.user_cwd),
+            project_root=str(project_context.project_root) if project_context.project_root else None,
             mcp_config_path=normalized_mcp,
             no_mcp=no_mcp,
             trust_project_mcp=trust_project_mcp,

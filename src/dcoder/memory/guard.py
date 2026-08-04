@@ -64,7 +64,7 @@ class _RestoreOutcome(Enum):
 class ManagedMemoryGuardMiddleware(AgentMiddleware):
     """Revert agent edits to the managed onboarding-name memory block."""
 
-    def __init__(self, guarded_paths: Iterable[str | Path]) -> None:
+    def __init__(self, guarded_paths: Iterable[str | Path] = ()) -> None:
         super().__init__()
         requested = list(guarded_paths)
         resolved: set[Path] = set()

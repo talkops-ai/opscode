@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
-from dcoder.config.manifest import DEFAULT_CONFIG_PATH
+from dcoder.config.paths import CONFIG_PATH as DEFAULT_CONFIG_PATH
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

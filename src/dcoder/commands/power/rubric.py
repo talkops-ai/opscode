@@ -103,13 +103,17 @@ class RubricHandler(BaseCommandHandler):
         if sub == "set":
             if not remainder:
                 return CommandResult(success=False, message="Usage: /rubric set <criteria>")
-            state.rubric = remainder
-            from dcoder.commands.power.goal import GoalHandler
-            GoalHandler._sync_status_rubric(ctx.app, state)
+            from langchain_core.messages import SystemMessage
+            async with ctx.app._goal_state_mutation_boundary():
+                state.rubric = remainder
+                from dcoder.commands.power.goal import GoalHandler
+                GoalHandler._sync_status_rubric(ctx.app, state)
+                await ctx.app._persist_goal_rubric_state(notice=SystemMessage(content="Rubric updated."))
             return CommandResult(
                 success=True,
                 message="Rubric set.",
                 notify="Rubric updated",
+                mount_as_app_message=False,
             )
 
         # ── next <criteria> ──────────────────────────────
@@ -128,18 +132,22 @@ class RubricHandler(BaseCommandHandler):
         if sub == "file":
             if not remainder:
                 return CommandResult(success=False, message="Usage: /rubric file <path>")
-            return self._set_from_file(ctx, state, remainder)
+            return await self._set_from_file(ctx, state, remainder)
 
         # ── clear ────────────────────────────────────────
         if sub == "clear":
-            state.rubric = None
-            state.next_rubric = None
-            from dcoder.commands.power.goal import GoalHandler
-            GoalHandler._sync_status_rubric(ctx.app, state)
+            from langchain_core.messages import SystemMessage
+            async with ctx.app._goal_state_mutation_boundary():
+                state.rubric = None
+                state.next_rubric = None
+                from dcoder.commands.power.goal import GoalHandler
+                GoalHandler._sync_status_rubric(ctx.app, state)
+                await ctx.app._persist_goal_rubric_state(notice=SystemMessage(content="Rubric cleared."))
             return CommandResult(
                 success=True,
                 message="Rubric cleared.",
                 notify="Rubric cleared",
+                mount_as_app_message=False,
             )
 
         # ── model [provider:model | clear] ───────────────
@@ -234,7 +242,7 @@ class RubricHandler(BaseCommandHandler):
 
         return CommandResult(success=True, message=usage)
 
-    def _set_from_file(self, ctx: CommandContext, state: "GoalState", file_path: str) -> CommandResult:
+    async def _set_from_file(self, ctx: CommandContext, state: "GoalState", file_path: str) -> CommandResult:
         """Load criteria from a file.
 
         Reference: app.py L11395-L11401.
@@ -260,10 +268,14 @@ class RubricHandler(BaseCommandHandler):
                 message=f"File is empty: `{file_path}`",
             )
 
-        state.rubric = content
-        from dcoder.commands.power.goal import GoalHandler
-        GoalHandler._sync_status_rubric(ctx.app, state)
+        from langchain_core.messages import SystemMessage
+        async with ctx.app._goal_state_mutation_boundary():
+            state.rubric = content
+            from dcoder.commands.power.goal import GoalHandler
+            GoalHandler._sync_status_rubric(ctx.app, state)
+            await ctx.app._persist_goal_rubric_state(notice=SystemMessage(content=f"Rubric loaded from file {path.name}"))
         return CommandResult(
             success=True,
             message=f"Rubric loaded from `{path.name}` ({len(content)} chars).",
+            mount_as_app_message=False,
         )

@@ -16,7 +16,7 @@ def _sanitize_error_detail(error: str | None) -> str:
     sanitized = sanitize_control_chars(error, max_length=_MCP_ERROR_DETAIL_LIMIT)
     return sanitized or "unknown error"
 
-@register_middleware(name="mcp", order=30)
+@register_middleware(name="mcp")
 class MCPContextMiddleware(AgentMiddleware):
     """Inject MCP server inventory into the system prompt."""
 

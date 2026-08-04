@@ -31,52 +31,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ── Constants (preserved from original) ──────────────────
+# ── Constants — re-exported from paths.py (single source of truth) ───
+# These re-exports maintain backward compatibility for existing imports.
 
-ENV_PREFIX = "DCODER_"
-DEFAULT_CONFIG_DIR = Path.home() / ".dcoder"
-DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.toml"
-DEFAULT_AGENT_NAME = "dcoder"
-
-# Keys that .env files are NEVER allowed to set
-DOTENV_DENIED_ENV_KEYS: frozenset[str] = frozenset({
-    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TERM", "DISPLAY",
-    "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES",
-    "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",
-    "NODE_PATH", "NODE_OPTIONS",
-    "HISTFILE", "HISTSIZE",
-    "SSH_AUTH_SOCK", "GPG_AGENT_INFO",
-    "TMPDIR", "TEMP", "TMP",
-})
-
-# Project root markers — walk up CWD to find these
-PROJECT_ROOT_MARKERS: tuple[str, ...] = (
-    ".git",
-    "terragrunt.hcl",
-    "Chart.yaml",
-    "ansible.cfg",
-    "pyproject.toml",
-    "package.json",
-    "Makefile",
-)
-
-# Fields that can be hot-reloaded via settings.reload_from_environment()
-RELOADABLE_FIELDS: frozenset[str] = frozenset({
-    "openai_api_key", "anthropic_api_key", "google_api_key",
-    "groq_api_key", "deepseek_api_key",
-    "project_root", "shell_allow_list",
-})
-
-# DevOps-specific env vars to preserve in shell environment
-DEVOPS_PRESERVE_ENV_VARS: tuple[str, ...] = (
-    "KUBECONFIG", "KUBE_CONTEXT",
-    "AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_SHARED_CREDENTIALS_FILE",
-    "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT",
-    "AZURE_SUBSCRIPTION_ID", "AZURE_TENANT_ID",
-    "ANSIBLE_CONFIG", "ANSIBLE_INVENTORY",
-    "HELM_HOME", "HELM_REPOSITORY_CONFIG",
-    "ARGOCD_SERVER", "ARGOCD_AUTH_TOKEN",
-    "TF_CLI_CONFIG_FILE", "TERRAGRUNT_CONFIG",
+from dcoder.config.paths import (  # noqa: F401
+    ENV_PREFIX,
+    DEFAULT_AGENT_NAME,
+    DATA_DIR as DEFAULT_CONFIG_DIR,
+    CONFIG_PATH as DEFAULT_CONFIG_PATH,
+    DOTENV_DENIED_ENV_KEYS,
+    PROJECT_ROOT_MARKERS,
+    RELOADABLE_FIELDS,
+    DEVOPS_PRESERVE_ENV_VARS,
 )
 
 # ── OptionKind ───────────────────────────────────────────

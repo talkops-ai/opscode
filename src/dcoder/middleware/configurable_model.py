@@ -41,7 +41,7 @@ def _is_anthropic_model(model: object) -> bool:
     return _get_ls_provider(model) == "anthropic"
 
 
-@register_middleware(name="configurable_model", order=10)
+@register_middleware(name="configurable_model")
 class ConfigurableModelMiddleware(AgentMiddleware):
     """Swap the model or per-call settings from runtime.context."""
 
@@ -127,6 +127,26 @@ class ConfigurableModelMiddleware(AgentMiddleware):
         new_model = model_result.model if model_result is not None else None
         if new_model is not None:
             overrides["model"] = new_model
+
+            if request.system_prompt:
+                from dcoder.prompts import MODEL_IDENTITY_RE, build_model_identity_section
+                from deepagents._models import get_model_provider
+                from dcoder.config.settings import settings
+                
+                provider = _get_ls_provider(new_model) or get_model_provider(new_model)
+                name = get_model_identifier(new_model)
+                limit = model_result.context_limit if model_result is not None else settings.model_context_limit
+                
+                new_identity = build_model_identity_section(
+                    name=name,
+                    provider=provider,
+                    context_limit=limit,
+                )
+                
+                new_prompt = MODEL_IDENTITY_RE.sub(
+                    new_identity.rstrip() + "\n", request.system_prompt
+                )
+                overrides["system_prompt"] = new_prompt
 
         if model_params:
             overrides["model_settings"] = {**request.model_settings, **model_params}

@@ -42,7 +42,7 @@ class SkillRegistry:
             return
 
         built_in_dir = Path(__file__).parent.parent / "built_in_skills"
-        user_skills_dir = settings.get_user_skills_dir("dcoder")
+        user_skills_dir = settings.get_user_skills_dir()
         project_skills_dir = settings.get_project_skills_dir()
 
         # Build list of directories to discover
@@ -97,19 +97,14 @@ class SkillRegistry:
         self._skills = new_skills
 
     def get_sources_for_middleware(self) -> list[tuple[str, ...]]:
-        """Return sources formatted as (path, label) or (path, label, namespace) for SkillsMiddleware."""
+        """Return sources ordered by lowest to highest precedence (Tier 1 to Tier 7) for SkillsMiddleware."""
+        sources: list[tuple[str, ...]] = []
+
+        # Tier 1: Built-in skills
         built_in_dir = Path(__file__).parent.parent / "built_in_skills"
-        user_skills_dir = settings.get_user_skills_dir("dcoder")
+        sources.append((str(built_in_dir), "Built-in"))
 
-        sources: list[tuple[str, ...]] = [
-            (str(built_in_dir), "Built-in"),
-            (str(user_skills_dir), "User"),
-        ]
-        if settings.project_root:
-            project_skills_dir = settings.project_root / ".dcoder" / "skills"
-            sources.append((str(project_skills_dir), "Project"))
-
-        # Include plugin-supplied skill directories
+        # Tier 2: Plugin skills (namespaced)
         try:
             from dcoder.plugins import discover_marketplace_plugins
 
@@ -130,6 +125,35 @@ class SkillRegistry:
         except Exception as exc:
             logger.warning("Could not discover plugin skills for middleware: %s", exc)
 
+        # Tier 3: User Deepagents skills (~/.dcoder/skills)
+        user_dcoder_dir = settings.get_user_skills_dir()
+        if user_dcoder_dir:
+            sources.append((str(user_dcoder_dir), "User Deepagents"))
+
+        # Tier 4: User Agents skills (~/.agents/skills)
+        user_agents_skills = Path.home() / ".agents" / "skills"
+        if user_agents_skills.is_dir():
+            sources.append((str(user_agents_skills), "User Agents"))
+
+        # Tier 5: Project Deepagents skills (.dcoder/skills)
+        if settings.project_root:
+            psd = settings.get_project_skills_dir()
+            if psd:
+                sources.append((str(psd), "Project Deepagents"))
+
+            # Tier 6: Project Agents skills (.agents/skills)
+            project_agents_skills = settings.project_root / ".agents" / "skills"
+            if project_agents_skills.is_dir():
+                sources.append((str(project_agents_skills), "Project Agents"))
+
+        # Tier 7: Claude experimental skills (~/.claude/skills, .claude/skills)
+        user_claude_skills = Path.home() / ".claude" / "skills"
+        if user_claude_skills.is_dir():
+            sources.append((str(user_claude_skills), "Claude Experimental User"))
+        if settings.project_root:
+            project_claude_skills = settings.project_root / ".claude" / "skills"
+            if project_claude_skills.is_dir():
+                sources.append((str(project_claude_skills), "Claude Experimental Project"))
 
         return [source for source in sources if Path(source[0]).exists()]
 

@@ -36,6 +36,9 @@ class ModelStats:
     output_tokens: int = 0
     """Cumulative output tokens received from this model."""
 
+    cost_usd: float = 0.0
+    """Cumulative estimated USD cost for priceable requests to this model."""
+
     provider: str = ""
     """Provider that served this model (e.g. `openai`), or `""` when unknown."""
 
@@ -69,6 +72,9 @@ class SessionStats:
     output_tokens: int = 0
     """Cumulative output tokens across all LLM requests."""
 
+    total_cost_usd: float = 0.0
+    """Cumulative estimated USD cost across priceable LLM requests."""
+
     wall_time_seconds: float = 0.0
     """Wall-clock duration from stream start to end."""
 
@@ -86,10 +92,12 @@ class SessionStats:
         input_toks: int,
         output_toks: int,
         provider: str = "",
+        *,
+        cost_usd: float | None = None,
     ) -> None:
-        """Accumulate token counts for one completed LLM request.
+        """Accumulate usage for one completed LLM request.
 
-        Updates both the session totals and the per-model breakdown.
+        Updates session totals plus the per-model breakdown.
 
         Args:
             model_name: The model that served this request. Combined with
@@ -100,10 +108,14 @@ class SessionStats:
             provider: Provider that served the model (e.g. `openai`). Combined
                 with `model_name` to form the per-model key, so the same model
                 served by different providers is tracked separately.
+            cost_usd: Estimated request cost, or `None` when no estimate exists.
+                Missing estimates leave monetary totals unchanged.
         """
         self.request_count += 1
         self.input_tokens += input_toks
         self.output_tokens += output_toks
+        if cost_usd is not None:
+            self.total_cost_usd += cost_usd
         if model_name:
             key = (provider, model_name)
             entry = self.per_model.setdefault(
@@ -113,6 +125,8 @@ class SessionStats:
             entry.request_count += 1
             entry.input_tokens += input_toks
             entry.output_tokens += output_toks
+            if cost_usd is not None:
+                entry.cost_usd += cost_usd
 
     def merge(self, other: SessionStats) -> None:
         """Merge another `SessionStats` into this one (mutates *self*).
@@ -125,6 +139,7 @@ class SessionStats:
         self.request_count += other.request_count
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
+        self.total_cost_usd += other.total_cost_usd
         self.wall_time_seconds += other.wall_time_seconds
         for key, ms in other.per_model.items():
             entry = self.per_model.setdefault(
@@ -134,6 +149,7 @@ class SessionStats:
             entry.request_count += ms.request_count
             entry.input_tokens += ms.input_tokens
             entry.output_tokens += ms.output_tokens
+            entry.cost_usd += ms.cost_usd
 
 
 def format_token_count(count: int) -> str:
@@ -150,3 +166,19 @@ def format_token_count(count: int) -> str:
     if count >= 1000:  # noqa: PLR2004
         return f"{count / 1000:.1f}K"
     return str(count)
+
+
+def format_cost(cost_usd: float) -> str:
+    """Format an estimated USD cost for compact display.
+
+    Args:
+        cost_usd: Estimated cost in US dollars.
+
+    Returns:
+        A string such as `'$0.42'`; positive sub-cent values use `'<$0.01'`.
+    """
+    if cost_usd <= 0:
+        return "$0.00"
+    if cost_usd < 0.01:  # noqa: PLR2004  # Display floor for sub-cent estimates.
+        return "<$0.01"
+    return f"${cost_usd:.2f}"

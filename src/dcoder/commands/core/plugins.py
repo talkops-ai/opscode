@@ -27,18 +27,37 @@ class PluginsHandler(BaseCommandHandler):
         return BypassTier.QUEUED
 
     async def execute(self, ctx: CommandContext) -> CommandResult:
-        # Try to push a PluginManager screen if available in TUI mode
+        # If subcommand arguments were passed, route to CLI plugin executor
+        args_text = (ctx.args or "").strip()
+        if args_text:
+            import shlex
+            import argparse
+            from dcoder.plugins.commands_cli import setup_plugin_parser, execute_plugin_command
+
+            parser = argparse.ArgumentParser(prog="dcoder", add_help=False)
+            subparsers = parser.add_subparsers()
+            setup_plugin_parser(subparsers)
+            try:
+                parsed_args = parser.parse_args(["plugin"] + shlex.split(args_text))
+                output = execute_plugin_command(parsed_args)
+                return CommandResult(success=True, message=output or "")
+            except SystemExit:
+                return CommandResult(success=False, message=f"Failed to execute command: /plugins {args_text}")
+            except Exception as e:
+                return CommandResult(success=False, message=f"Error: {e}")
+
+        # No args passed: try to push PluginManager screen in TUI mode
         if ctx.app and hasattr(ctx.app, "_show_plugin_manager"):
             res = ctx.app._show_plugin_manager()
             if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
                 await res
             return CommandResult(success=True, message="", mount_as_app_message=False)
 
-        # Fallback: check app._discovered_plugins if set on legacy mock app
+        # Fallback: check app._discovered_plugins if set on mock app
         if ctx.app and getattr(ctx.app, "_discovered_plugins", None):
-            plugins = ctx.app._discovered_plugins or []
+            plugins_list = ctx.app._discovered_plugins or []
             lines = ["🔌 **Installed Plugins:**\n"]
-            for p in plugins:
+            for p in plugins_list:
                 name = getattr(p, "name", str(p))
                 desc = getattr(p, "description", "")
                 status = "✅" if getattr(p, "healthy", True) else "❌"

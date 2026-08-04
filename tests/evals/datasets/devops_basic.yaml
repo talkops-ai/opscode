@@ -1,0 +1,54 @@
+# DevOps Basic Eval Dataset
+# Tests quality of agent-generated infrastructure code and responses.
+
+scenarios:
+  # ── Terraform generation quality ───
+  - name: tf_vpc_basic
+    input: "Create a Terraform configuration for an AWS VPC with 2 public subnets"
+    expected:
+      success: true
+      output_contains:
+        - "resource"
+        - "aws_vpc"
+        - "aws_subnet"
+        - "cidr_block"
+      output_not_contains:
+        - "TODO"
+        - "placeholder"
+
+  - name: tf_s3_bucket
+    input: "Create a Terraform resource for an S3 bucket with versioning enabled"
+    expected:
+      success: true
+      output_contains:
+        - "aws_s3_bucket"
+        - "versioning"
+
+  # ── Kubernetes manifest quality ────
+  - name: k8s_deployment
+    input: "Create a Kubernetes Deployment manifest for an nginx web server"
+    expected:
+      success: true
+      output_contains:
+        - "apiVersion"
+        - "kind: Deployment"
+        - "image"
+        - "nginx"
+
+  - name: k8s_service
+    input: "Create a Kubernetes Service to expose the nginx deployment"
+    expected:
+      success: true
+      output_contains:
+        - "kind: Service"
+        - "port"
+
+  # ── Helm chart quality ─────────────
+  - name: helm_values
+    input: "Create a Helm values.yaml for an app with 3 replicas and 512Mi memory limit"
+    expected:
+      success: true
+      output_contains:
+        - "replicaCount"
+        - "512Mi"
+        - "limits"

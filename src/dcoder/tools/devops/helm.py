@@ -4,37 +4,35 @@ from __future__ import annotations
 
 import shlex
 from typing import Annotated, Any
-from langchain_core.tools import InjectedToolArg, tool
-from langchain.tools import ToolRuntime
+from langchain_core.tools import tool
+from langchain_core.tools import BaseTool
 
-@tool
-def helm_lint(
-    directory: str,
-    runtime: Annotated[ToolRuntime[Any, Any] | None, InjectedToolArg()] = None,
-) -> dict[str, Any]:
-    """Lint a Helm chart to check for errors and best practices.
+def create_helm_lint_tool(backend: Any) -> BaseTool:
+    @tool
+    def helm_lint(
+        directory: str,
+    ) -> dict[str, Any]:
+        """Lint a Helm chart to check for errors and best practices.
 
-    Args:
-        directory: Directory containing the Helm chart (Chart.yaml).
-    """
-    if runtime is None:
-        raise ValueError("runtime is required")
-    cmd = f"cd {shlex.quote(directory)} && helm lint ."
-    res = getattr(runtime, "backend").execute(cmd)
-    return {"output": res.output, "exit_code": res.exit_code}
+        Args:
+            directory: Directory containing the Helm chart (Chart.yaml).
+        """
+        cmd = f"cd {shlex.quote(directory)} && helm lint ."
+        res = backend.execute(cmd)
+        return {"output": res.output, "exit_code": res.exit_code}
+    return helm_lint
 
-@tool
-def helm_template(
-    directory: str,
-    runtime: Annotated[ToolRuntime[Any, Any] | None, InjectedToolArg()] = None,
-) -> dict[str, Any]:
-    """Render chart templates locally and display the output.
+def create_helm_template_tool(backend: Any) -> BaseTool:
+    @tool
+    def helm_template(
+        directory: str,
+    ) -> dict[str, Any]:
+        """Render chart templates locally and display the output.
 
-    Args:
-        directory: Directory containing the Helm chart (Chart.yaml).
-    """
-    if runtime is None:
-        raise ValueError("runtime is required")
-    cmd = f"cd {shlex.quote(directory)} && helm template ."
-    res = getattr(runtime, "backend").execute(cmd)
-    return {"output": res.output, "exit_code": res.exit_code}
+        Args:
+            directory: Directory containing the Helm chart (Chart.yaml).
+        """
+        cmd = f"cd {shlex.quote(directory)} && helm template ."
+        res = backend.execute(cmd)
+        return {"output": res.output, "exit_code": res.exit_code}
+    return helm_template

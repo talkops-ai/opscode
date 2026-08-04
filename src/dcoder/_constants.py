@@ -10,8 +10,26 @@ from __future__ import annotations
 
 from typing import Final
 
-DEFAULT_AGENT_NAME: Final[str] = "dcoder"
+DEFAULT_AGENT_NAME: Final[str] = "agent"
 """Default agent / assistant identifier when no ``-a`` flag is given."""
+
+FS_TOOL_NAMES: Final[frozenset[str]] = frozenset(
+    {"ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep", "execute"}
+)
+"""Mirror of the SDK's ``FsToolName`` literal members.
+
+Hardcoded here rather than derived from ``deepagents.FsToolName`` because
+``deepagents`` must not be imported on the arg-parsing hot path; this module is
+dependency-free and safe for ``main.py`` to import.
+"""
+
+SDK_DEFAULT_RUBRIC_MAX_ITERATIONS: Final[int] = 3
+"""Default ``RubricMiddleware.max_iterations``, shown without importing the SDK.
+
+Hardcoded rather than read from ``deepagents.middleware.rubric.RubricMiddleware``
+because this module is dependency-free and importing the SDK for a display
+string would violate the startup-performance rule.
+"""
 
 SYSTEM_MESSAGE_PREFIX: Final[str] = "[SYSTEM]"
 """Prefix for synthetic human messages (e.g. interrupt cancellation notices).

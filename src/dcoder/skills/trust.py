@@ -14,7 +14,8 @@ class SkillTrustStore:
 
     def __init__(self, trust_file_path: Path | None = None) -> None:
         if trust_file_path is None:
-            self.trust_file_path = settings.user_dcoder_dir / ".state" / "skill_trust.json"
+            from dcoder.config.paths import SKILL_TRUST_PATH
+            self.trust_file_path = SKILL_TRUST_PATH
         else:
             self.trust_file_path = trust_file_path
         self._trusted_dirs: set[str] = set()
@@ -64,9 +65,10 @@ class SkillTrustStore:
             pass
 
         # Auto-trust user home dcoder skills
-        user_skills_dir = settings.user_dcoder_dir / "dcoder" / "skills"
+        from dcoder.config.paths import user_skills_dir
+        user_sd = user_skills_dir()
         try:
-            if resolved.is_relative_to(user_skills_dir.resolve()):
+            if resolved.is_relative_to(user_sd.resolve()):
                 return True
         except Exception:
             pass

@@ -9,7 +9,7 @@ from dcoder.security.shell_safety import is_shell_command_allowed
 
 logger = logging.getLogger("dcoder")
 
-@register_middleware(name="shell_allow_list", order=40)
+@register_middleware(name="shell_allow_list")
 class ShellAllowListMiddleware(AgentMiddleware):
     """Validate shell commands against an allow-list without HITL interrupts."""
 

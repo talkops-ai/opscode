@@ -11,8 +11,10 @@ class DCodCompositeBackend(CompositeBackend):
     def __init__(self, default: Any, routes: dict[str, Any] | None = None, **kwargs: Any):
         import atexit
 
+        from dcoder.config.paths import ensure_conversation_history_dir
+
         self._large_results_dir = tempfile.mkdtemp(prefix="dcoder_large_results_")
-        self._conversation_history_dir = tempfile.mkdtemp(prefix="dcoder_conversation_history_")
+        self._conversation_history_dir = ensure_conversation_history_dir()
 
         atexit.register(self.cleanup)
 
@@ -39,12 +41,10 @@ class DCodCompositeBackend(CompositeBackend):
         )
 
     def cleanup(self) -> None:
-        """Explicitly clean up temporary directories."""
+        """Explicitly clean up temporary directories (leave persistent conversation history intact)."""
         import shutil
         if hasattr(self, "_large_results_dir") and self._large_results_dir:
             shutil.rmtree(self._large_results_dir, ignore_errors=True)
-        if hasattr(self, "_conversation_history_dir") and self._conversation_history_dir:
-            shutil.rmtree(self._conversation_history_dir, ignore_errors=True)
 
     def __enter__(self) -> "DCodCompositeBackend":
         return self

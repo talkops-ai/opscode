@@ -27,9 +27,10 @@ import logging
 import sys
 import time
 from collections import deque
-from contextlib import suppress
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, cast
 
 from textual import events, on
 from textual.app import App, ComposeResult
@@ -38,6 +39,7 @@ from textual.containers import Container
 from textual.css.query import NoMatches
 from textual.message import Message
 from textual.theme import Theme
+from textual.worker import Worker
 
 from dcoder.ui.approval import (
     ApprovalDecided,
@@ -123,6 +125,23 @@ def _format_error_detail(err: Exception) -> str:
             pass
     return err_str
 
+
+def _split_model_spec(spec: str) -> tuple[str, str]:
+    """Split ``'provider:model'`` into ``(provider, model)``.
+
+    If the spec contains a colon the left part is the provider; otherwise
+    the provider is inferred from common prefixes (``claude`` → ``anthropic``,
+    ``gemini`` → ``google``, default → ``openai``).
+    """
+    if ":" in spec:
+        provider, _, model = spec.partition(":")
+        return provider.strip(), model.strip()
+    lower = spec.lower()
+    if lower.startswith("claude") or lower.startswith("anthropic"):
+        return "anthropic", spec
+    if lower.startswith("gemini") or lower.startswith("google"):
+        return "google", spec
+    return "openai", spec
 
 
 # ── Queued Message ───────────────────────────────────────
@@ -223,8 +242,13 @@ class DCoderApp(App):
         self._server_startup_error: Exception | None = None
         self._exit = False
 
+        # ── Goal State Synchronization ────────────────────
+        self._goal_state_lock = asyncio.Lock()
+        self._goal_state_mutating = False
+        self._agent_reconciling = False
+
         # ── Worker Handles ───────────────────────────────
-        self._agent_worker: Any | None = None
+        self._agent_worker: Worker[None] | None = None
         self._shell_worker: Any | None = None
         self._shell_process: asyncio.subprocess.Process | None = None
 
@@ -306,7 +330,8 @@ class DCoderApp(App):
         messages_widget = self.query_one("#messages", MessageList)
         status_bar = self.query_one("#status-bar", StatusBar)
         eff = getattr(self, "_reasoning_effort", None) or (getattr(getattr(self, "settings", None), "reasoning_effort", None))
-        status_bar.set_model(self._model or "", effort=eff or "")
+        _provider, _model = _split_model_spec(self._model or "")
+        status_bar.set_model(provider=_provider, model=_model, effort=eff or "")
         status_bar.set_approval_mode("manual" if not self._auto_approve else "auto")
 
         # Create adapter early with client=None (will be bound on ServerReady)
@@ -535,6 +560,13 @@ class DCoderApp(App):
         """Create thread and mark the app as ready for agent turns."""
         if self._resume_thread:
             self._agent_thread_id = self._resume_thread
+            session_state = getattr(self, "_session_state", None)
+            if session_state:
+                session_state.thread_id = self._resume_thread
+            await self._mount_message(
+                SystemMessage(f"🔄 Resumed thread: `{self._resume_thread}`")
+            )
+            await self._load_thread_history(self._resume_thread)
         else:
             import uuid
             self._agent_thread_id = str(uuid.uuid4())
@@ -567,7 +599,7 @@ class DCoderApp(App):
             return
 
         # Hide the inline popup
-        self._chat_input._autocomplete.hide_popup()
+        self._chat_input._autocomplete.hide()
 
         cmd = get_command(event.command_name)
         has_args = bool(cmd and cmd.argument_hint)
@@ -781,7 +813,12 @@ class DCoderApp(App):
                 )
             )
 
-    async def _run_agent_task(self, message: str) -> None:
+    async def _run_agent_task(
+        self,
+        message: str,
+        *,
+        graph_input: dict[str, Any] | None = None,
+    ) -> None:
         """Run the agent task in a background worker.
 
         This runs in a Textual worker so the main event loop stays responsive.
@@ -789,42 +826,638 @@ class DCoderApp(App):
 
         Args:
             message: The prompt to send to the agent.
+            graph_input: Prepared non-conversation input for a server operation
+                (e.g. goal criteria generation).  When set, ``message`` is
+                ignored by ``stream_turn``.
         """
         if self._adapter is None:
             return
 
+        # Track criteria request correlation for cleanup (reference: app.py L15685-L15691).
+        criteria_request_id: str | None = None
+        if graph_input is not None:
+            criteria_request = graph_input.get("goal_criteria_request")
+            if isinstance(criteria_request, dict):
+                raw_request_id = criteria_request.get("request_id")
+                if isinstance(raw_request_id, str):
+                    criteria_request_id = raw_request_id
+
+        task_succeeded = False
         try:
             context = {"model": self._model} if self._model else None
             await self._adapter.stream_turn(
                 prompt=message,
                 thread_id=self._agent_thread_id or "local_session",
                 context=context,
+                graph_input=graph_input,
             )
+            task_succeeded = True
         except asyncio.CancelledError:
             logger.debug("Agent task cancelled")
         except Exception as e:
             logger.exception("Agent execution failed: %s", e)
-            await self._mount_message(
-                ErrorMessage(_format_error_detail(e))
-            )
+            body = _format_error_detail(e)
+            # Criteria generation: surface an actionable message
+            # (reference: app.py L15900-L15904).
+            if graph_input is not None and graph_input.get("goal_criteria_request"):
+                body = (
+                    "Could not generate acceptance criteria for this goal. "
+                    "Run `/goal` again to retry."
+                )
+            await self._mount_message(ErrorMessage(body))
 
         finally:
-            await self._cleanup_agent_task()
+            await self._cleanup_agent_task(
+                force_goal_sync=graph_input is not None,
+                goal_criteria_request_id=criteria_request_id,
+                goal_criteria_succeeded=(
+                    criteria_request_id is None or task_succeeded
+                ),
+            )
 
-    async def _cleanup_agent_task(self) -> None:
-        """Clean up after agent task completes or is cancelled.
+    async def _cleanup_agent_task(
+        self,
+        *,
+        force_goal_sync: bool = False,
+        goal_criteria_request_id: str | None = None,
+        goal_criteria_succeeded: bool = True,
+    ) -> None:
+        """Tear down after a turn completes or is cancelled.
 
-        Always runs in the ``finally`` block of ``_run_agent_task``.
-        Guaranteed to drain the queue.
+        Resets spinner/cursor, syncs goal state from the checkpoint, drains
+        the message queue, then releases the reconciliation flag.
+        Reference: app.py L16028-L16191.
+
+        Args:
+            force_goal_sync: Read goal state even when no local goal fields
+                are set (e.g. after a criteria generation turn).
+            goal_criteria_request_id: Terminal criteria request to correlate
+                when restoring a newly generated proposal.
+            goal_criteria_succeeded: Whether criteria generation completed
+                without failure or cancellation.
         """
+        self._agent_reconciling = True
         self._agent_running = False
         self._agent_worker = None
 
-        if self._chat_input:
-            self._chat_input.focus()
+        try:
+            try:
+                # Dismiss the spinner (reference: app.py L16067).
+                if self._adapter and self._adapter._set_spinner:
+                    try:
+                        await self._adapter._set_spinner(None)
+                    except Exception:
+                        pass
 
-        # Process next message from queue
-        await self._process_next_from_queue()
+                if self._chat_input:
+                    self._chat_input.focus()
+
+                # ── Goal state synchronization from checkpoint ──
+                # Reference: app.py L16072-L16094.
+                await self._sync_goal_state_from_checkpoint(
+                    force=force_goal_sync,
+                    proposal_request_id=goal_criteria_request_id,
+                    allow_pending_proposal=goal_criteria_succeeded,
+                )
+
+            except Exception:
+                logger.exception("Error during agent cleanup goal sync")
+
+            # Process next message from queue
+            if not self._startup_sequence_running:
+                await self._process_next_from_queue()
+        finally:
+            self._agent_reconciling = False
+
+    # ── Goal State Management ────────────────────────────
+    #
+    # These methods match the reference deepagents_code/app.py goal
+    # infrastructure: mutation boundary, checkpoint persistence, state
+    # sync from thread, criteria request submission, and accept flow.
+
+    @asynccontextmanager
+    async def _goal_state_mutation_boundary(self) -> AsyncIterator[None]:
+        """Serialize an out-of-run goal mutation with graph checkpoints.
+
+        Reference: app.py L11131-L11140.
+        """
+        async with self._goal_state_lock:
+            self._goal_state_mutating = True
+            try:
+                # Wait for agent quiescence (reference: app.py L11118-L11121).
+                while self._agent_running or self._agent_reconciling:
+                    await asyncio.sleep(0.05)
+                yield
+            finally:
+                self._goal_state_mutating = False
+
+    async def _aupdate_thread_state(self, update: dict[str, Any]) -> None:
+        """Write one state update through the graph client.
+
+        Reference: app.py L11142-L11154.  DCoder always uses a RemoteGraph
+        via the adapter's client, so this maps to the ``aupdate_state`` call
+        used in the reference's remote path.
+        """
+        if not self._adapter or not self._adapter.connected or not self._agent_thread_id:
+            return
+        config: dict[str, Any] = {"configurable": {"thread_id": self._agent_thread_id}}
+        await self._adapter._client.aupdate_state(config, update, as_node="model")
+
+    def _goal_state_update(self) -> dict[str, Any]:
+        """Build checkpoint state for goal/rubric metadata managed by the TUI.
+
+        Reference: app.py L11073-L11116.
+        """
+        from dcoder.commands.power.goal import get_goal_state
+
+        state = get_goal_state(self)
+        return {
+            "rubric": (
+                None
+                if state.objective and state.status in {"paused", "complete"}
+                else state.rubric
+            ),
+            "_sticky_rubric": state.rubric,
+            "_goal_objective": state.objective,
+            "_goal_status": state.status if state.objective else None,
+            "_goal_rubric": state.rubric if state.objective else None,
+            "_goal_status_note": state.status_note if state.objective else None,
+            "_pending_goal_objective": state.pending_objective,
+            "_pending_goal_rubric": state.pending_rubric,
+            "_pending_goal_kind": (
+                state.pending_kind if state.pending_objective else None
+            ),
+        }
+
+    async def _persist_goal_rubric_state(
+        self,
+        *,
+        notice: Any | None = None,
+        state_update: dict[str, Any] | None = None,
+    ) -> bool:
+        """Persist TUI-owned goal state and an optional notice atomically.
+
+        Reference: app.py L11156-L11183.
+
+        Returns:
+            ``True`` when the state was written or there is no thread to write
+            to yet; ``False`` when a write was attempted and failed.
+        """
+        if not self._adapter or not self._adapter.connected or not self._agent_thread_id:
+            return True
+        update = dict(state_update or self._goal_state_update())
+        if notice is not None:
+            update["messages"] = [notice]
+        try:
+            await self._aupdate_thread_state(update)
+        except Exception:
+            logger.warning("Failed to persist goal/rubric state", exc_info=True)
+            self.notify(
+                "Could not persist goal/rubric state for this thread.",
+                severity="warning",
+                markup=False,
+            )
+            return False
+        return True
+
+    async def _get_thread_state_values(self, thread_id: str | None = None) -> dict[str, Any]:
+        """Fetch thread state values from the checkpoint.
+
+        In server mode the LangGraph dev server starts with an empty in-memory
+        thread store, so ``aget_state`` returns empty state for any thread that
+        was not registered in the current server session.  Calling
+        ``aensure_thread`` first registers the thread idempotently so the
+        subsequent ``aget_state`` call can read from the checkpointer correctly,
+        including proper reconstruction of delta channels.
+
+        When the remote path returns empty (server restarting, delta-channel
+        messages not yet replayed), a **local checkpointer fallback** reads the
+        same SQLite database and reconstructs messages by replaying the writes
+        table through LangChain's ``add_messages`` reducer — matching how the
+        reference code (``deepagents_code/sessions.py`` L965-L1043) reconstructs
+        message counts.  The fallback filters ``checkpoint_ns = ''`` (parent
+        graph only) so sub-graph messages never leak.
+
+        Args:
+            thread_id: Explicit thread ID to fetch.  Defaults to the current
+                active thread (``self._agent_thread_id``).
+
+        Reference: deepagents_code/app.py L16307-L16337.
+        """
+        tid = thread_id or self._agent_thread_id
+        if not tid:
+            return {}
+
+        config: dict[str, Any] = {"configurable": {"thread_id": tid}}
+
+        # ── Path 1: Remote agent (reference pattern) ──────────────
+        if self._adapter and self._adapter.connected:
+            client = self._adapter._client
+            if hasattr(client, "aensure_thread"):
+                try:
+                    await client.aensure_thread(config)
+                except Exception:
+                    logger.debug("aensure_thread failed for %s, proceeding anyway", tid)
+
+            try:
+                state = await client.aget_state(config)
+                if state and state.values:
+                    return dict(state.values)
+            except Exception:
+                logger.debug(
+                    "Remote aget_state failed for %s; trying local checkpointer",
+                    tid,
+                    exc_info=True,
+                )
+
+        # ── Path 2: Local checkpointer fallback ───────────────────
+        # Reconstruct messages from the SQLite writes table through the
+        # add_messages reducer, exactly as the reference's
+        # _load_message_counts_from_writes_batch does (with checkpoint_ns='').
+        return await self._reconstruct_state_from_local_db(tid)
+
+    async def _reconstruct_state_from_local_db(
+        self,
+        thread_id: str,
+    ) -> dict[str, Any]:
+        """Reconstruct thread state from the local SQLite checkpoint database.
+
+        This is the fallback when ``RemoteGraph.aget_state`` returns empty
+        (e.g. after a server restart before the thread is fully rehydrated).
+
+        The method reads message-channel writes from the ``writes`` table —
+        filtered to ``checkpoint_ns = ''`` (parent graph only, matching the
+        reference's ``_load_message_counts_from_writes_batch`` in
+        ``deepagents_code/sessions.py`` L1027-L1033) — and replays them through
+        LangChain's ``add_messages`` reducer.  This handles deduplication by
+        message ID, ``RemoveMessage`` deletions, and ``Overwrite`` resets,
+        producing the same result as ``Pregel.aget_state``'s
+        ``DeltaChannel.replay_writes``.
+
+        Returns:
+            State-values dict with a ``messages`` key.  Empty dict when the
+            database is missing or the thread has no writes.
+        """
+        import asyncio
+
+        from dcoder.state.session import get_db_path
+
+        db_path = get_db_path()
+        if not db_path.exists():
+            return {}
+
+        try:
+            import aiosqlite
+            from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+            serde = JsonPlusSerializer()
+
+            async with aiosqlite.connect(db_path) as conn:
+                # Read all message-channel writes for the parent graph only.
+                # Ordered by (checkpoint_id, task_id, idx) to replay oldest →
+                # newest, matching LangGraph's application order.
+                # Reference: deepagents_code/sessions.py L1027-L1033.
+                async with conn.execute(
+                    """
+                    SELECT type, value
+                    FROM writes
+                    WHERE thread_id = ?
+                      AND checkpoint_ns = ''
+                      AND channel = 'messages'
+                    ORDER BY checkpoint_id ASC, task_id ASC, idx ASC
+                    """,
+                    (thread_id,),
+                ) as cursor:
+                    rows: list[tuple[str, bytes]] = [
+                        (r[0], r[1]) for r in await cursor.fetchall()
+                    ]
+
+            if not rows:
+                return {}
+
+            # Decode + reduce in a worker thread (CPU-bound for large histories).
+            loop = asyncio.get_running_loop()
+            messages = await loop.run_in_executor(
+                None, self._reduce_message_writes, rows, serde
+            )
+            if messages:
+                return {"messages": messages}
+        except Exception:
+            logger.warning(
+                "Local DB reconstruction failed for thread %s",
+                thread_id,
+                exc_info=True,
+            )
+
+        return {}
+
+    @staticmethod
+    def _reduce_message_writes(
+        rows: list[tuple[str, bytes]],
+        serde: Any,
+    ) -> list[Any]:
+        """Replay message-channel write rows through ``add_messages``.
+
+        Runs synchronously in a worker thread.  Matches the reference's
+        ``_reduce_message_write_rows`` / ``_count_messages_from_deltas``
+        pattern (``deepagents_code/sessions.py`` L1046-L1087, L1099-L1175).
+        """
+        from langgraph.graph.message import add_messages
+
+        accumulated: list[Any] = []
+
+        for type_str, value_blob in rows:
+            if not type_str or not value_blob:
+                continue
+            try:
+                delta = serde.loads_typed((type_str, value_blob))
+            except Exception:
+                logger.warning(
+                    "Failed to decode a message write row; skipping",
+                    exc_info=True,
+                )
+                continue
+
+            # Each delta is either a single message or a list of messages.
+            # add_messages handles dedup by ID, RemoveMessage, etc.
+            # Cast to list — add_messages returns a Messages union type but
+            # always produces a list at runtime.
+            if isinstance(delta, list):
+                accumulated = list(add_messages(accumulated, delta))
+            else:
+                accumulated = list(add_messages(accumulated, [delta]))
+
+        return accumulated
+
+
+    async def _sync_goal_state_from_checkpoint(
+        self,
+        *,
+        force: bool = False,
+        proposal_request_id: str | None = None,
+        allow_pending_proposal: bool = True,
+    ) -> bool:
+        """Refresh goal/rubric metadata from the active checkpoint.
+
+        Reference: app.py L11737-L11957 (simplified — dcoder doesn't have
+        grading correlation, one-shot rubric bookkeeping, or auto-accept).
+
+        Args:
+            force: Read the checkpoint even when no goal fields are set locally.
+            proposal_request_id: When set, restore a pending proposal only if
+                it originated from this criteria request.
+            allow_pending_proposal: Whether a proposal from this turn may be
+                restored.  Failed/cancelled criteria turns set ``False``.
+
+        Returns:
+            Whether state was successfully reconciled.
+        """
+        from dcoder.commands.power.goal import GoalHandler, get_goal_state
+
+        goal_state = get_goal_state(self)
+        if not force and not (
+            goal_state.objective
+            or goal_state.rubric
+            or goal_state.next_rubric
+            or goal_state.status_note
+            or goal_state.pending_objective
+            or goal_state.pending_rubric
+        ):
+            return True
+
+        try:
+            state_values = await self._get_thread_state_values()
+        except Exception:
+            logger.warning("Failed to refresh goal/rubric state", exc_info=True)
+            if force:
+                # Criteria were generated but couldn't be loaded
+                # (reference: app.py L11840-L11845).
+                if goal_state.pending_objective and goal_state.pending_rubric:
+                    self._open_goal_review(
+                        goal_state.pending_objective,
+                        goal_state.pending_rubric,
+                    )
+                else:
+                    await self._mount_message(
+                        ErrorMessage(
+                            "Acceptance criteria were generated but could not be "
+                            "loaded from the thread. Run `/goal` again to retry."
+                        )
+                    )
+            return False
+
+        if not state_values:
+            return True
+
+        # ── Extract checkpoint goal fields ────────────────
+        pending_obj = None
+        pending_rubric = None
+        pending_kind = None
+        pending_request_id = None
+
+        raw_pending_obj = state_values.get("_pending_goal_objective")
+        if isinstance(raw_pending_obj, str) and raw_pending_obj.strip():
+            pending_obj = raw_pending_obj.strip()
+        raw_pending_rubric = state_values.get("_pending_goal_rubric")
+        if isinstance(raw_pending_rubric, str) and raw_pending_rubric.strip():
+            pending_rubric = raw_pending_rubric.strip()
+        raw_pending_kind = state_values.get("_pending_goal_kind")
+        if isinstance(raw_pending_kind, str) and raw_pending_kind.strip():
+            pending_kind = raw_pending_kind.strip()
+        raw_pending_request_id = state_values.get("_pending_goal_request_id")
+        if isinstance(raw_pending_request_id, str):
+            pending_request_id = raw_pending_request_id
+
+        # ── Active goal fields from checkpoint ───────────
+        raw_obj = state_values.get("_goal_objective")
+        if isinstance(raw_obj, str) and raw_obj.strip():
+            goal_state.objective = raw_obj.strip()
+        raw_status = state_values.get("_goal_status")
+        if isinstance(raw_status, str) and raw_status in {
+            "active", "blocked", "complete", "paused",
+        }:
+            goal_state.status = raw_status  # type: ignore[assignment]
+        raw_note = state_values.get("_goal_status_note")
+        if isinstance(raw_note, str) and raw_note.strip():
+            goal_state.status_note = raw_note.strip()
+        raw_rubric = state_values.get("_goal_rubric") or state_values.get("_sticky_rubric")
+        if isinstance(raw_rubric, str) and raw_rubric.strip():
+            goal_state.rubric = raw_rubric.strip()
+
+        # ── Gate pending proposal on request correlation ──
+        # Reference: app.py L11872-L11896.
+        discard = False
+        if not allow_pending_proposal and pending_obj is not None:
+            if proposal_request_id is None or pending_request_id == proposal_request_id:
+                discard = True
+        if (
+            proposal_request_id is not None
+            and pending_request_id != proposal_request_id
+        ):
+            discard = True
+
+        if discard:
+            pending_obj = None
+            pending_rubric = None
+            pending_kind = None
+            pending_request_id = None
+            goal_state.pending_objective = None
+            goal_state.pending_rubric = None
+            goal_state.pending_kind = None
+        else:
+            goal_state.pending_objective = pending_obj
+            goal_state.pending_rubric = pending_rubric
+            goal_state.pending_kind = pending_kind
+
+        GoalHandler._sync_status_rubric(self, goal_state)
+
+        # ── Mount review if pending proposal exists ──────
+        # Reference: app.py L11949-L11953.
+        if pending_obj and pending_rubric:
+            self._open_goal_review(pending_obj, pending_rubric)
+
+        return True
+
+    async def _run_goal_criteria_request(
+        self,
+        request: dict[str, Any],
+    ) -> None:
+        """Submit one typed criteria request through the normal agent stream.
+
+        Reference: app.py L12329-L12365.
+        """
+        if not self._adapter or not self._adapter.connected:
+            await self._mount_message(
+                ErrorMessage(
+                    "Goal criteria generation requires a connected server."
+                )
+            )
+            return
+        self._agent_running = True
+        if self._chat_input:
+            # Disable input while criteria run.
+            pass
+        self._agent_worker = self.run_worker(
+            self._run_agent_task(
+                "",
+                graph_input={
+                    "messages": [],
+                    "goal_criteria_request": request,
+                },
+            ),
+            exclusive=False,
+        )
+
+    async def _accept_goal_rubric(
+        self,
+        rubric: str,
+    ) -> bool:
+        """Apply accepted criteria: persist to checkpoint and start work.
+
+        Reference: app.py L12741-L12795 + L12824-L12917.
+
+        Returns:
+            Whether the proposal was accepted.
+        """
+        from dcoder.commands.power.goal import GoalHandler, get_goal_state
+
+        goal_state = get_goal_state(self)
+        objective = goal_state.pending_objective
+        if not objective:
+            await self._mount_message(
+                SystemMessage("No pending goal to accept.")
+            )
+            return False
+        rubric = rubric.strip()
+        if not rubric:
+            await self._mount_message(
+                SystemMessage("Cannot accept empty goal criteria.")
+            )
+            return False
+
+        kind = goal_state.pending_kind or "create"
+        is_amendment = kind == "amend"
+
+        if is_amendment and (not goal_state.objective or goal_state.status == "complete"):
+            await self._mount_message(
+                SystemMessage(
+                    "The goal is no longer active. Start a new goal with "
+                    "`/goal <objective>`."
+                )
+            )
+            return False
+
+        # ── Persist accepted state ───────────────────────
+        # Reference: app.py L12797-L12822.
+        goal_state.objective = objective
+        goal_state.rubric = rubric
+        goal_state.next_rubric = None
+        if not is_amendment:
+            goal_state.status = "active"
+            goal_state.status_note = None
+        goal_state.pending_objective = None
+        goal_state.pending_rubric = None
+        goal_state.pending_kind = None
+        GoalHandler._sync_status_rubric(self, goal_state)
+
+        from langchain_core.messages import SystemMessage as LCSystemMessage
+
+        notice = LCSystemMessage(content=f"Goal {'amended' if is_amendment else 'accepted'}.")
+        persisted = await self._persist_goal_rubric_state(notice=notice)
+
+        # ── User feedback message ────────────────────────
+        # Reference: app.py L12869-L12893.
+        if is_amendment:
+            await self._mount_message(
+                SystemMessage("Goal amended." + ("" if persisted else
+                    " (could not be saved to thread)"))
+            )
+        else:
+            await self._mount_message(
+                SystemMessage(
+                    "Goal accepted. It will stay active for this thread until paused, "
+                    "completed, blocked, or cleared.\nUse /goal show to inspect it or "
+                    "/goal clear to remove it."
+                )
+            )
+            if not persisted:
+                await self._mount_message(
+                    ErrorMessage(
+                        "Goal accepted for this session, but it could not be saved "
+                        "to the thread."
+                    )
+                )
+
+        # ── Continuation: start working toward the goal ──
+        # Reference: app.py L12907-L12917 + L12934-L12951.
+        if goal_state.status == "paused":
+            return True
+        if not self._agent_running:
+            await self._continue_goal_work(
+                "amended" if is_amendment else "created",
+                objective=objective,
+                persisted=persisted,
+            )
+        return True
+
+    async def _continue_goal_work(
+        self,
+        transition: str,
+        *,
+        objective: str | None = None,
+        persisted: bool = True,
+    ) -> None:
+        """Send one hidden command that resumes work after a goal transition.
+
+        Reference: app.py L12934-L12951.
+        """
+        from dcoder.middleware.goal_state_notice import build_goal_continuation
+
+        continuation = build_goal_continuation(
+            transition,  # type: ignore[arg-type]
+            unsaved_objective=None if persisted else objective,
+        )
+        await self._send_to_agent(cast("str", continuation.content))
 
     # ── Shell Command Execution ──────────────────────────
 
@@ -1120,54 +1753,199 @@ class DCoderApp(App):
         return None
 
     async def _load_thread_history(self, thread_id: str) -> None:
-        """Fetch and mount stored message history for a thread from SessionManager."""
-        from pathlib import Path
-        from dcoder.state.session import SessionManager
-        from dcoder.ui.messages import UserMessage, AssistantMessage, ToolCallMessage
+        """Fetch and mount stored message history for a thread.
 
-        sm = None
-        session_state = getattr(self, "_session_state", None)
-        if session_state and hasattr(session_state, "session_manager"):
-            sm = session_state.session_manager
-        else:
-            db_path = Path.home() / ".dcoder" / ".state" / "sessions.db"
-            if db_path.exists():
-                sm = SessionManager(db_path)
+        Follows the reference ``_convert_messages_to_data`` +
+        ``_load_thread_history`` pattern: filter internal messages first via
+        ``is_internal_message``, then convert each message type into a widget.
 
-        if sm is None:
+        Reference: deepagents_code/app.py L16193-L16305, L16585-L16787.
+        """
+        import re
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+        from dcoder.middleware.goal_state_notice import is_internal_message
+        from dcoder.ui.messages import (
+            AssistantMessage,
+            MessageList,
+            ToolCallMessage,
+            UserMessage,
+        )
+
+        state_values = await self._get_thread_state_values(thread_id)
+        raw_messages = state_values.get("messages", [])
+
+        if not raw_messages:
             return
 
-        messages_to_mount = await sm.get_thread_messages(thread_id)
+        # RemoteGraph.aget_state returns values as raw JSON dicts; convert to
+        # LangChain message objects so is_internal_message / isinstance work.
+        if any(isinstance(m, dict) for m in raw_messages):
+            from langchain_core.messages.utils import convert_to_messages
+            raw_messages = convert_to_messages(raw_messages)
 
+        # ── Convert & match tool calls (reference pattern) ─
+        #
+        # AIMessage may carry .tool_calls *and* text content.
+        # ToolMessage results are matched back via tool_call_id so the
+        # widget shows the result alongside the right tool name + args.
+        pending_tools: dict[str, dict] = {}  # tool_call_id → {name, args, widget}
 
-        for msg in messages_to_mount:
-            content = getattr(msg, "content", None)
-            if content is None:
+        try:
+            messages_container = self.query_one("#messages", MessageList)
+        except NoMatches:
+            return
+
+        for msg in raw_messages:
+            # ── Gate 1: skip internal messages (reference L16213) ─────
+            # Catches goal_control, goal_state, rubric_grader, summarization
+            # messages via lc_source metadata AND [SYSTEM]-prefixed text.
+            if is_internal_message(msg):
                 continue
 
-            if isinstance(content, list):
-                txt_parts = []
-                for block in content:
+            # ── Gate 2: skip named sub-graph messages ──────────────
+            # Sub-graph agents (rubric grader, criteria generator) set
+            # `name` on their messages.  Defense-in-depth: these should be
+            # excluded by the `checkpoint_ns = ''` filter in the local
+            # DB reconstruction, but we guard here in case of edge cases.
+            msg_name = getattr(msg, "name", None) or ""
+            if msg_name in {"rubric_grader", "goal_criteria"}:
+                continue
+
+            # ── Gate 3: skip LangChain system messages ────────────────
+            msg_type = getattr(msg, "type", type(msg).__name__.lower().replace("message", ""))
+            if msg_type == "system":
+                continue
+
+            content_raw = getattr(msg, "content", None)
+            if content_raw is None:
+                continue
+
+            # Normalise list-of-blocks content → plain string
+            if isinstance(content_raw, list):
+                parts = []
+                for block in content_raw:
                     if isinstance(block, dict) and block.get("type") == "text":
-                        txt_parts.append(block.get("text", ""))
+                        parts.append(block.get("text", ""))
                     elif isinstance(block, str):
-                        txt_parts.append(block)
-                content = "".join(txt_parts).strip()
+                        parts.append(block)
+                text = "".join(parts).strip()
+            else:
+                text = str(content_raw).strip()
 
-            if not content:
-                continue
+            if isinstance(msg, HumanMessage) or msg_type == "human":
+                if not text:
+                    continue
 
-            msg_type = type(msg).__name__
-            if msg_type == "HumanMessage" or getattr(msg, "type", "") == "human":
-                if not str(content).startswith("System Prompt"):
-                    await self._mount_message(UserMessage(str(content)))
-            elif msg_type == "AIMessage" or getattr(msg, "type", "") == "ai":
-                await self._mount_message(AssistantMessage(str(content)))
-            elif msg_type == "ToolMessage" or getattr(msg, "type", "") == "tool":
-                call_id = getattr(msg, "tool_call_id", "call_1") or "call_1"
-                tool_widget = ToolCallMessage(name="Tool Result", call_id=call_id, args={})
-                tool_widget.set_result(str(content), success=True)
-                await self._mount_message(tool_widget)
+                # Skip grader evaluation prompts leaked from sub-graph
+                # writes.  The SDK's _build_grader_payload produces these
+                # with a distinctive prefix.
+                if text.startswith("This is grader iteration "):
+                    continue
+
+                # Skip system prompt echoes
+                if text.startswith("System Prompt"):
+                    continue
+
+                # ── Extract user intent from goal <operation> XML ─────
+                # These are criteria sub-graph prompts that leak into the
+                # main messages channel.  Extract the user-facing intent
+                # (/goal …) when possible; skip entirely otherwise.
+                if text.startswith("<operation>"):
+                    if text.startswith("<operation>draft</operation>"):
+                        match = re.search(r"<goal>\s*(.*?)\s*</goal>", text, re.DOTALL)
+                        if match:
+                            text = f"/goal {match.group(1).strip()}"
+                        else:
+                            continue  # Unextractable draft — skip
+                    elif text.startswith("<operation>amend</operation>"):
+                        match = re.search(r"<user_feedback>\s*(.*?)\s*</user_feedback>", text, re.DOTALL)
+                        if match:
+                            text = f"/goal amend {match.group(1).strip()}"
+                        else:
+                            text = "/goal amend"
+                    else:
+                        continue  # Unknown operation type — skip
+
+                await self._mount_message(UserMessage(text))
+
+            elif isinstance(msg, AIMessage) or msg_type == "ai":
+                # Extract text and thinking from AIMessage
+                from dcoder.ui.textual_adapter import _extract_text_and_thinking
+                ai_text, thinking = _extract_text_and_thinking(
+                    getattr(msg, "content", ""),
+                    getattr(msg, "additional_kwargs", None),
+                    getattr(msg, "response_metadata", None),
+                    msg_obj=msg
+                )
+                if ai_text or thinking:
+                    if thinking:
+                        messages_container.add_thinking_message(thinking)
+                    if ai_text:
+                        assistant_msg = AssistantMessage(ai_text)
+                        await self._mount_message(assistant_msg)
+
+                # Mount tool-call widgets for each tool_call in this AI message.
+                # Guard against malformed entries: SQLite rehydration can produce
+                # lists or other non-dict shapes inside tool_calls.
+                for tc in getattr(msg, "tool_calls", []) or []:
+                    if not isinstance(tc, dict):
+                        logger.debug(
+                            "Skipping malformed tool_call entry (type=%s) "
+                            "during history load for thread %s",
+                            type(tc).__name__, thread_id,
+                        )
+                        continue
+                    tc_id = tc.get("id", "")
+                    name = tc.get("name") or "tool"
+                    args = tc.get("args") or {}
+                    if not isinstance(args, dict):
+                        args = {}
+                    messages_container.add_tool_call(
+                        name=name, call_id=tc_id, args=args,
+                    )
+                    if tc_id:
+                        pending_tools[tc_id] = {"name": name}
+
+            elif isinstance(msg, ToolMessage) or msg_type == "tool":
+                tc_id = getattr(msg, "tool_call_id", "") or ""
+                status = getattr(msg, "status", "success")
+                tool_content = text or ""
+                success = status != "error"
+
+                if tc_id and tc_id in pending_tools:
+                    pending_tools.pop(tc_id)
+                    messages_container.update_tool_result(
+                        call_id=tc_id,
+                        result=tool_content,
+                        success=success,
+                    )
+                else:
+                    tool_name = getattr(msg, "name", None) or "tool"
+                    messages_container.update_tool_result(
+                        call_id=tc_id or "",
+                        result=tool_content,
+                        success=success,
+                        name=tool_name,
+                    )
+            else:
+                logger.debug(
+                    "Skipping unsupported message type %s during history load",
+                    type(msg).__name__,
+                )
+
+        # Mark unmatched tool calls as rejected (reference L16301-L16303)
+        for tc_id in pending_tools:
+            if tc_id in messages_container._tool_calls:
+                messages_container._tool_calls[tc_id].set_rejected()
+
+        # Scroll to bottom after history loads (reference L16769-L16774)
+        try:
+            from textual.containers import VerticalScroll
+            chat = self.query_one("#chat", VerticalScroll)
+            chat.scroll_end(animate=False)
+        except NoMatches:
+            pass
+
 
     async def resume_thread(self, thread_id: str, *, is_new: bool = False) -> None:
         """Resume conversation from specified checkpoint thread ID and restore history."""
@@ -1190,6 +1968,8 @@ class DCoderApp(App):
         )
         if not is_new:
             await self._load_thread_history(thread_id)
+            if hasattr(self, "_sync_goal_state_from_checkpoint"):
+                await self._sync_goal_state_from_checkpoint(force=True)
 
 
     async def invoke_compact_conversation(self, thread_id: str | None = None, force: bool = True) -> None:
@@ -1358,19 +2138,14 @@ class DCoderApp(App):
 
     @on(TextualAdapter.ToolCallStarted)
     def _on_tool_started(self, event: TextualAdapter.ToolCallStarted) -> None:
-        try:
-            status_bar = self.query_one("#status-bar", StatusBar)
-            status_bar.set_status(f"Running tool: {event.name}")
-        except NoMatches:
-            pass
+        # Tool activity is shown inline via ToolCallMessage widgets.
+        # The reference does NOT put tool names in the status bar.
+        pass
 
     @on(TextualAdapter.ToolCallCompleted)
     def _on_tool_completed(self, event: TextualAdapter.ToolCallCompleted) -> None:
-        try:
-            status_bar = self.query_one("#status-bar", StatusBar)
-            status_bar.set_status("Thinking...")
-        except NoMatches:
-            pass
+        # Tool completion is shown inline via ToolCallMessage.set_success().
+        pass
 
     @on(TextualAdapter.InterruptRaised)
     def _on_interrupt_raised(self, event: TextualAdapter.InterruptRaised) -> None:
@@ -1440,7 +2215,11 @@ class DCoderApp(App):
     async def _on_stream_finished(self, event: TextualAdapter.StreamFinished) -> None:
         try:
             status_bar = self.query_one("#status-bar", StatusBar)
-            status_bar.update_stats(event.stats)
+            total_tokens = event.stats.input_tokens + event.stats.output_tokens
+            status_bar.set_tokens(total_tokens)
+            if event.stats.total_cost_usd:
+                status_bar.set_cost(event.stats.total_cost_usd)
+            status_bar.set_status("Ready")
         except NoMatches:
             pass
         # Note: queue draining is handled by _cleanup_agent_task, not here
@@ -1539,7 +2318,8 @@ class DCoderApp(App):
         if session_state and hasattr(session_state, "session_manager"):
             sm = session_state.session_manager
         else:
-            db_path = Path.home() / ".dcoder" / ".state" / "sessions.db"
+            from dcoder.state.session import get_db_path
+            db_path = get_db_path()
             if db_path.exists():
                 sm = SessionManager(db_path)
 
@@ -1548,11 +2328,11 @@ class DCoderApp(App):
                 raw_threads = await sm.list_threads(limit=50)
                 threads = [
                     {
-                        "thread_id": t.thread_id,
-                        "created_at": t.created_at,
-                        "updated_at": t.updated_at,
-                        "message_count": t.message_count,
-                        "initial_prompt": t.initial_prompt,
+                        "thread_id": t.get("thread_id"),
+                        "created_at": t.get("created_at"),
+                        "updated_at": t.get("updated_at"),
+                        "message_count": t.get("message_count", 0),
+                        "initial_prompt": t.get("initial_prompt", ""),
                     }
                     for t in raw_threads
                 ]
@@ -1584,7 +2364,8 @@ class DCoderApp(App):
         if session_state and hasattr(session_state, "session_manager"):
             sm = session_state.session_manager
         else:
-            db_path = Path.home() / ".dcoder" / ".state" / "sessions.db"
+            from dcoder.state.session import get_db_path
+            db_path = get_db_path()
             if db_path.exists():
                 sm = SessionManager(db_path)
 
@@ -1805,10 +2586,11 @@ class DCoderApp(App):
         eff_display = effort or getattr(self, "_reasoning_effort", "") or ""
 
         if self._adapter:
-            self._adapter._stats.model = spec
+            pass
         try:
             status_bar = self.query_one("#status-bar", StatusBar)
-            status_bar.set_model(spec, effort=eff_display)
+            _prov, _mdl = _split_model_spec(spec)
+            status_bar.set_model(provider=_prov, model=_mdl, effort=eff_display)
         except NoMatches:
             pass
 
@@ -1866,7 +2648,8 @@ class DCoderApp(App):
                 settings_obj.reasoning_effort = None
             try:
                 sb = self.query_one("#status-bar", StatusBar)
-                sb.set_model(model_spec, effort="")
+                _prov, _mdl = _split_model_spec(model_spec)
+                sb.set_model(provider=_prov, model=_mdl, effort="")
             except Exception:
                 pass
             await self._mount_message(SystemMessage(f"Reasoning effort override cleared for `{model_spec}`."))
@@ -1880,7 +2663,8 @@ class DCoderApp(App):
 
         try:
             sb = self.query_one("#status-bar", StatusBar)
-            sb.set_model(model_spec, effort=effort)
+            _prov, _mdl = _split_model_spec(model_spec)
+            sb.set_model(provider=_prov, model=_mdl, effort=effort)
         except Exception:
             pass
 
@@ -1991,27 +2775,27 @@ class DCoderApp(App):
     # ── Goal Review ──────────────────────────────────────
 
     def _open_goal_review(self, objective: str, rubric: str) -> None:
-        """Push the goal review modal for user approval of generated rubric."""
+        """Push the goal review modal for user approval of generated rubric.
+
+        Reference: app.py L12428-L12449 + L12600-L12640.
+        The accept path persists the accepted state to the checkpoint and
+        then starts a continuation turn that sends the objective to the
+        agent, matching the reference accept-then-work flow.
+        """
         from dcoder.ui.goal_review import GoalReviewScreen
 
         def _on_review_result(result: str | None) -> None:
             """Handle the review decision."""
-            from dcoder.commands.power.goal import get_goal_state
-
-            state = get_goal_state(self)
-
             if result == "accept":
-                state.objective = state.pending_objective or objective
-                state.status = "active"
-                state.rubric = state.pending_rubric or rubric
-                state.pending_objective = None
-                state.pending_rubric = None
-                from dcoder.commands.power.goal import GoalHandler
-                GoalHandler._sync_status_rubric(self, state)
+                # Persist + continuation runs async — schedule on the event loop.
+                asyncio.ensure_future(self._accept_goal_rubric(rubric))
             elif result == "reject":
+                from dcoder.commands.power.goal import GoalHandler, get_goal_state
+
+                state = get_goal_state(self)
+                feedback = ""  # TODO: capture feedback from the reject dialog
                 state.pending_objective = None
                 state.pending_rubric = None
-                from dcoder.commands.power.goal import GoalHandler
                 GoalHandler._sync_status_rubric(self, state)
             # else: cancelled — leave pending state for retry
 

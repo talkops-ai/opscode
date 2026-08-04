@@ -21,31 +21,24 @@ class MCPDiscovery:
         pass
 
     def discover(self, project_root: Path | None = None) -> dict[str, MCPServerConfig]:
-        """Merge configs. Precedence: project > user (~/.dcoder/mcp.json) > global (~/.agents/mcp.json)."""
+        """Merge configs. Precedence: project > user (~/.dcoder/.mcp.json) > global (~/.agents/.mcp.json)."""
+        from dcoder.config import paths as config_paths
         from dcoder.config.settings import settings
         
         effective_project_root = project_root or settings.project_root or Path.cwd()
         
-        # 1. Global configs
+        # 1. Global configs (~/.agents/)
         global_paths = [
-            Path.home() / ".agents" / "mcp.json",
-            Path.home() / ".agents" / ".mcp.json",
+            config_paths.AGENTS_SHARED_DIR / "mcp.json",
+            config_paths.AGENTS_SHARED_DIR / ".mcp.json",
         ]
-        # 2. User configs (~/.dcoder/mcp.json or ~/.dcoder/.mcp.json)
+        # 2. User configs (~/.dcoder/.mcp.json)
         user_paths = [
-            settings.user_dcoder_dir / "mcp.json",
-            settings.user_dcoder_dir / ".mcp.json",
+            config_paths.DATA_DIR / "mcp.json",
+            config_paths.GLOBAL_MCP_PATH,
         ]
-        # 3. Project subdirectory configs ({project_root}/.dcoder/mcp.json or .mcp.json)
-        project_subdir_paths = [
-            effective_project_root / ".dcoder" / "mcp.json",
-            effective_project_root / ".dcoder" / ".mcp.json",
-        ]
-        # 4. Project root configs ({project_root}/.mcp.json or mcp.json)
-        project_root_paths = [
-            effective_project_root / "mcp.json",
-            effective_project_root / ".mcp.json",
-        ]
+        # 3+4. Project configs (combined from paths module)
+        project_candidate_paths = config_paths.project_mcp_paths(effective_project_root)
         
         merged_servers: dict[str, MCPServerConfig] = {}
         
@@ -54,9 +47,7 @@ class MCPDiscovery:
             candidates.append((p, "global"))
         for p in user_paths:
             candidates.append((p, "user"))
-        for p in project_subdir_paths:
-            candidates.append((p, "project"))
-        for p in project_root_paths:
+        for p in project_candidate_paths:
             candidates.append((p, "project"))
 
         # Load from lowest to highest precedence

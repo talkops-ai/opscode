@@ -2,6 +2,9 @@
 
 This module is referenced by the generated `langgraph.json` and exposes a graph
 factory that the LangGraph server can load and serve.
+
+The graph is created by `make_graph()`, which reads configuration from
+`ServerConfig.from_env()`.
 """
 
 from __future__ import annotations
@@ -12,15 +15,13 @@ import sys
 import traceback
 from typing import TYPE_CHECKING, Any
 
+from dcoder.server._server_config import ServerConfig
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-from dcoder.server import SERVER_ENV_PREFIX
-from dcoder.server._server_config import ServerConfig
-
 logger = logging.getLogger(__name__)
 
-# Machine-readable prefix for startup errors
 _STARTUP_ERROR_MARKER = "DCODER_STARTUP_ERROR:"
 
 
@@ -42,117 +43,133 @@ def emit_startup_failure(exc: BaseException) -> None:
 async def _make_graph() -> Any:
     """Create the agent graph from environment-based configuration.
 
-    All blocking work (env reads, os.getcwd, file I/O, settings loading,
-    model resolution) runs inside ``asyncio.to_thread`` because the
-    ``langgraph-api`` inmem runtime uses *blockbuster* to forbid blocking
-    syscalls on the async event loop.
+    All initialization runs inside a worker thread so blockbuster on the langgraph dev
+    server event loop never catches blocking syscalls (os.getcwd, open, stat) on MainThread.
     """
 
-    def _create():
-        import os
-        from pathlib import Path
-        from dcoder.config.settings import _load_dotenv, settings
-        from dcoder.model.config import apply_stored_credentials
+    def _make_graph_sync() -> Any:
+        from dcoder.agent.factory import create_dcoder_agent
+        from dcoder.config.settings import settings
+        from dcoder.model.factory import create_model
+        from dcoder.project_utils import get_server_project_context
+        from dcoder.tools.catalog import register_all_tools
+        from dcoder.tools.registry import ToolRegistry
 
-        _load_dotenv(refresh_loaded=True)
         config = ServerConfig.from_env()
+        project_context = get_server_project_context()
 
-        # Resolve project working directory from server env
-        user_cwd_raw = os.environ.get(f"{SERVER_ENV_PREFIX}CWD")
-        user_cwd = Path(user_cwd_raw) if user_cwd_raw else None
-
-        if user_cwd is not None:
-            settings.reload_from_environment(start_path=user_cwd)
-
-        # Apply configuration to settings
-        if config.shell_allow_list is not None:
-            settings.shell_allow_list = config.shell_allow_list
-
-        tools: list = []
-        reasoning_eff = os.environ.get("DCODER_REASONING_EFFORT") or os.environ.get("DCODER_SERVER_REASONING_EFFORT")
-        if reasoning_eff:
-            settings.reasoning_effort = reasoning_eff
+        if project_context is not None:
+            settings.reload_from_environment(start_path=project_context.user_cwd)
 
         model_spec = (
             config.model
-            or os.environ.get("DCODER_SERVER_MODEL")
-            or os.environ.get("DCODER_MODEL_NAME")
-            or settings.model_name
+            or getattr(settings, "model_name", None)
             or "openai:gpt-4o"
         )
-        provider = model_spec.split(":", 1)[0] if ":" in model_spec else "openai"
-        apply_stored_credentials(provider)
 
-        logger.info(
-            "Initializing Server Graph Agent: model_spec=%s, GOOGLE_API_KEY_set=%s, VERTEXAI=%s",
-            model_spec,
-            bool(os.environ.get("GOOGLE_API_KEY")),
-            os.environ.get("GOOGLE_GENAI_USE_VERTEXAI"),
-        )
+        model_res = create_model(model_spec)
+        model_res.apply_to_settings()
 
-        from dcoder.agent.factory import create_dcoder_agent
+        register_all_tools()
+        registry = ToolRegistry.get_instance()
 
-        agent, _ = create_dcoder_agent(
-            model=model_spec,
+        tools: list[Any] = []
+        default_tool_names = [
+            "web_search",
+            "fetch_url",
+            "terraform_validate",
+            "terraform_plan",
+            "terraform_fmt",
+            "helm_lint",
+            "helm_template",
+            "kubectl_get",
+            "kubectl_describe",
+            "kubectl_logs",
+            "ansible_check",
+            "argocd_diff",
+        ]
+        for tool_name in default_tool_names:
+            try:
+                tools.append(registry.build_tool(tool_name))
+            except Exception as e:
+                logger.warning("Failed to build registered tool %s: %s", tool_name, e)
+
+        mcp_tools: list[Any] = []
+        if not config.no_mcp:
+            from dcoder.mcp.discovery import MCPDiscovery
+            from dcoder.mcp.trust import compute_config_fingerprint, is_project_mcp_trusted
+
+            discovery = MCPDiscovery()
+            mcp_config = discovery.discover()
+            if mcp_config:
+                project_config_path = (
+                    settings.project_root / ".mcp.json" if settings.project_root else None
+                )
+                trust_project = True
+                if project_config_path and project_config_path.exists():
+                    fingerprint = compute_config_fingerprint([project_config_path])
+                    trust_project = is_project_mcp_trusted(str(settings.project_root), fingerprint)
+
+        if config.enable_interpreter:
+            settings.enable_interpreter = True
+
+        agent, _composite_backend = create_dcoder_agent(
+            model=model_res.model,
             assistant_id=config.assistant_id,
             tools=tools,
+            mcp_tools=mcp_tools,
+            sandbox=config.sandbox_type,
             system_prompt=config.system_prompt,
             interactive=config.interactive,
             auto_approve=config.auto_approve,
             enable_shell=config.enable_shell,
-            cwd=user_cwd or config.cwd,
-            sandbox=config.sandbox_type,
+            enable_interpreter=config.enable_interpreter,
+            cwd=project_context.user_cwd if project_context is not None else config.cwd,
         )
         return agent
 
-    return await asyncio.to_thread(_create)
+    return await asyncio.to_thread(_make_graph_sync)
 
 
-def _build_graph_factory() -> Callable[[], Awaitable[Any]]:
-    cached_graph: Any = None
-    cached_key: tuple[str, str | None, str | None] | None = None
+def _build_graph_factory(
+    builder: Callable[[], Awaitable[Any]] | None = None,
+) -> Callable[[], Awaitable[Any]]:
+    missing = object()
+    graph: Any = missing
     lock = asyncio.Lock()
 
     async def make_graph() -> Any:
-        nonlocal cached_graph, cached_key
-
-        def _get_key():
-            import os
-            from dcoder.config.settings import _load_dotenv, settings, resolve_env_var
-            from dcoder.model.config import apply_stored_credentials
-
-            _load_dotenv(refresh_loaded=True)
-            model_spec = (
-                os.environ.get("DCODER_SERVER_MODEL")
-                or os.environ.get("DCODER_MODEL_NAME")
-                or settings.model_name
-                or "openai:gpt-4o"
-            )
-            provider = model_spec.split(":", 1)[0] if ":" in model_spec else "openai"
-            apply_stored_credentials(provider)
-            key_val = (
-                resolve_env_var(f"{provider.upper()}_API_KEY")
-                or os.environ.get("GOOGLE_API_KEY")
-                or os.environ.get("OPENAI_API_KEY")
-                or os.environ.get("ANTHROPIC_API_KEY")
-            )
-            vertex_val = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI")
-            return (model_spec, key_val, vertex_val)
-
-        current_key = await asyncio.to_thread(_get_key)
-
-        if cached_graph is not None and cached_key == current_key:
-            return cached_graph
-
+        nonlocal graph
+        if graph is not missing:
+            return graph
         async with lock:
-            if cached_graph is None or cached_key != current_key:
+            if graph is missing:
                 try:
-                    cached_graph = await _make_graph()
-                    cached_key = current_key
+                    graph = await (builder or _make_graph)()
                 except Exception as exc:
                     emit_startup_failure(exc)
+                    # Check for credential-related failures so the parent
+                    # process captures a descriptive message instead of a
+                    # bare exit code.
+                    exc_str = str(exc).lower()
+                    is_credential_error = any(
+                        keyword in exc_str
+                        for keyword in (
+                            "api_key",
+                            "api key",
+                            "credential",
+                            "authentication",
+                            "unauthorized",
+                            "missing",
+                        )
+                    )
+                    if is_credential_error:
+                        # Re-raise so the parent ServerProcess captures the
+                        # exception text and surfaces it via ServerStartFailed,
+                        # rather than a bare exit code 3.
+                        raise
                     sys.exit(1)
-            return cached_graph
+            return graph
 
     return make_graph
 

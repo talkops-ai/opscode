@@ -17,6 +17,7 @@ MAX_ARG_LENGTH = 80
 
 _CUSTOM_DISPLAY_NAMES: dict[str, str] = {
     "read_file": "Read",
+    "view_file": "Read",
     "write_file": "Write",
     "edit_file": "Edit",
     "delete": "Delete",
@@ -205,7 +206,7 @@ def format_tool_result_summary(tool_name: str, result: str) -> str:
     line_count = len(result.splitlines())
 
     # Core tool specific formatters
-    if raw_lower in {"read_file", "read"}:
+    if raw_lower in {"read_file", "view_file", "read"}:
         return f"⎿ Read {line_count} lines"
     elif raw_lower in {"ls", "list_dir", "glob"}:
         if result.startswith("[") and result.endswith("]"):

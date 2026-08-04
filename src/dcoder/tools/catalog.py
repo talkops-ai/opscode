@@ -12,31 +12,40 @@ def register_all_tools() -> None:
     registry.register("web_search", lambda **kwargs: web_search)
     registry.register("fetch_url", lambda **kwargs: fetch_url)
     
+    from dcoder.tools.thread import get_current_thread_id
+    registry.register("get_current_thread_id", lambda **kwargs: get_current_thread_id)
+    
+    # Goal and Rubric tools
+    from dcoder.tools.goal_tools import get_rubric, get_goal, update_goal
+    registry.register("get_rubric", lambda **kwargs: get_rubric)
+    registry.register("get_goal", lambda **kwargs: get_goal)
+    registry.register("update_goal", lambda **kwargs: update_goal)
+    
     # DevOps-specific tools
     from dcoder.tools.devops.terraform import (
-        terraform_validate,
-        terraform_plan,
-        terraform_fmt,
+        create_terraform_validate_tool,
+        create_terraform_plan_tool,
+        create_terraform_fmt_tool,
     )
-    from dcoder.tools.devops.helm import helm_lint, helm_template
+    from dcoder.tools.devops.helm import create_helm_lint_tool, create_helm_template_tool
     from dcoder.tools.devops.kubectl import (
-        kubectl_get,
-        kubectl_describe,
-        kubectl_logs,
+        create_kubectl_get_tool,
+        create_kubectl_describe_tool,
+        create_kubectl_logs_tool,
     )
-    from dcoder.tools.devops.ansible import ansible_check
-    from dcoder.tools.devops.argocd import argocd_diff
+    from dcoder.tools.devops.ansible import create_ansible_check_tool
+    from dcoder.tools.devops.argocd import create_argocd_diff_tool
 
-    registry.register("terraform_validate", lambda **kwargs: terraform_validate)
-    registry.register("terraform_plan", lambda **kwargs: terraform_plan)
-    registry.register("terraform_fmt", lambda **kwargs: terraform_fmt)
+    registry.register("terraform_validate", create_terraform_validate_tool)
+    registry.register("terraform_plan", create_terraform_plan_tool)
+    registry.register("terraform_fmt", create_terraform_fmt_tool)
     
-    registry.register("helm_lint", lambda **kwargs: helm_lint)
-    registry.register("helm_template", lambda **kwargs: helm_template)
+    registry.register("helm_lint", create_helm_lint_tool)
+    registry.register("helm_template", create_helm_template_tool)
     
-    registry.register("kubectl_get", lambda **kwargs: kubectl_get)
-    registry.register("kubectl_describe", lambda **kwargs: kubectl_describe)
-    registry.register("kubectl_logs", lambda **kwargs: kubectl_logs)
+    registry.register("kubectl_get", create_kubectl_get_tool)
+    registry.register("kubectl_describe", create_kubectl_describe_tool)
+    registry.register("kubectl_logs", create_kubectl_logs_tool)
     
-    registry.register("ansible_check", lambda **kwargs: ansible_check)
-    registry.register("argocd_diff", lambda **kwargs: argocd_diff)
+    registry.register("ansible_check", create_ansible_check_tool)
+    registry.register("argocd_diff", create_argocd_diff_tool)

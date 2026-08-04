@@ -35,12 +35,14 @@ Identify:
 """
 
 def get_built_in_subagents() -> list[SubagentMetadata]:
-    """Return list of default DevOps subagents."""
+    """Return list of default DevOps subagents with domain skills and tools whitelists."""
     return [
         {
             "name": "terraform-reviewer",
             "description": "Expert reviewer for Terraform/OpenTofu structure, locks, and security vulnerabilities.",
             "system_prompt": TERRAFORM_REVIEWER_PROMPT,
+            "skills": ["terraform*", "terragrunt*", "common-devops:*"],
+            "tools": ["read_file", "write_file", "edit_file", "dir_list", "terraform_*"],
             "source": "built-in",
             "path": "",
         },
@@ -48,6 +50,8 @@ def get_built_in_subagents() -> list[SubagentMetadata]:
             "name": "helm-validator",
             "description": "Validation specialist for Helm template rendering, chart layouts, and value configurations.",
             "system_prompt": HELM_VALIDATOR_PROMPT,
+            "skills": ["helm*", "kubernetes*", "common-devops:*"],
+            "tools": ["read_file", "write_file", "edit_file", "dir_list", "helm_*"],
             "source": "built-in",
             "path": "",
         },
@@ -55,6 +59,8 @@ def get_built_in_subagents() -> list[SubagentMetadata]:
             "name": "k8s-auditor",
             "description": "Security and resource utilization auditor for Kubernetes manifests.",
             "system_prompt": K8S_AUDITOR_PROMPT,
+            "skills": ["kubernetes*", "helm*", "common-devops:*"],
+            "tools": ["read_file", "write_file", "edit_file", "dir_list", "kubectl_*", "mcp__kubectl__*"],
             "source": "built-in",
             "path": "",
         },

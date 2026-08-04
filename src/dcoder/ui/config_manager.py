@@ -492,10 +492,9 @@ class ConfigManagerScreen(ModalScreen[None]):
                         try:
                             from dcoder.ui.status import StatusBar
                             sb = self.app.query_one("#status-bar", StatusBar)
-                            sb.set_model(
-                                getattr(self.app, "_model", "") or "",
-                                effort=result,
-                            )
+                            _spec = getattr(self.app, "_model", "") or ""
+                            _prov, _mod = (_spec.split(":", 1) if ":" in _spec else ("", _spec))
+                            sb.set_model(provider=_prov, model=_mod, effort=result)
                         except Exception:
                             pass
                         self.post_message(self.SettingChanged("models.reasoning_effort", result))

@@ -74,14 +74,20 @@ class ModelHandler(BaseCommandHandler):
         if ctx.settings is not None:
             ctx.settings.model_name = model_name
 
+        from dcoder.config.toml_config import save_recent_model
+        save_recent_model(model_name)
+
         return CommandResult(
             success=True,
             message=f"🤖 **Switched Model:** `{model_name}`",
         )
 
     async def _handle_default(self, ctx: CommandContext, args: str) -> CommandResult:
+        from dcoder.config.toml_config import clear_default_model, save_default_model
+
         rest = args[len("--default"):].strip()
         if rest == "--clear":
+            clear_default_model()
             if ctx.app is not None and hasattr(ctx.app, "clear_default_model"):
                 await ctx.app.clear_default_model()
             if ctx.settings is not None:
@@ -89,6 +95,7 @@ class ModelHandler(BaseCommandHandler):
             return CommandResult(success=True, message="Default model cleared.")
 
         if rest:
+            save_default_model(rest)
             if ctx.app is not None and hasattr(ctx.app, "set_default_model"):
                 await ctx.app.set_default_model(rest)
             if ctx.settings is not None:
@@ -96,6 +103,7 @@ class ModelHandler(BaseCommandHandler):
             return CommandResult(success=True, message=f"Default model set to: `{rest}`")
 
         return CommandResult(success=False, message="Usage: /model --default provider:model | --clear")
+
 
 
 __all__ = ["ModelHandler"]

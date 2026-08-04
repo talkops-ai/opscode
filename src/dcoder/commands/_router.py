@@ -77,6 +77,15 @@ class CommandRouter:
             except ImportError:
                 logger.debug("Command sub-package %s not yet available", pkg_name)
 
+        # Discover and register plugin commands
+        try:
+            from dcoder.plugins.adapters.commands import discover_plugin_commands
+
+            for plugin_handler in discover_plugin_commands():
+                self.register(plugin_handler)
+        except Exception as exc:
+            logger.debug("Plugin command discovery skipped in router: %s", exc)
+
         self._discovered = True
 
     def _register_handlers_from_module(self, module: Any) -> None:

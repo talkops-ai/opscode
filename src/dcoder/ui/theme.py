@@ -544,76 +544,32 @@ def _read_config_toml_data() -> dict[str, Any]:
 
 
 def _write_config_toml_data(data: dict[str, Any]) -> bool:
+    import contextlib
+    import tempfile
+    import tomli_w
+
     try:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        lines: list[str] = []
-        ui = data.get("ui", {})
-        if isinstance(ui, dict) and ui:
-            lines.append("[ui]")
-            terminal_themes = None
-            for k, v in ui.items():
-                if k == "terminal_themes":
-                    terminal_themes = v
-                    continue
-                if isinstance(v, bool):
-                    lines.append(f"{k} = {str(v).lower()}")
-                elif isinstance(v, (int, float)):
-                    lines.append(f"{k} = {v}")
-                else:
-                    lines.append(f'{k} = "{v}"')
-            lines.append("")
-
-            if isinstance(terminal_themes, dict) and terminal_themes:
-                lines.append("[ui.terminal_themes]")
-                for term_key, theme_val in terminal_themes.items():
-                    # Quote key to handle dotted program names like iTerm.app properly in TOML
-                    lines.append(f'"{term_key}" = "{theme_val}"')
-                lines.append("")
-
-        # ── [permissions] section ────────────────────────
-        perms = data.get("permissions", {})
-        if isinstance(perms, dict) and perms:
-            lines.append("[permissions]")
-            mode = perms.get("mode", "default")
-            lines.append(f'mode = "{mode}"')
-            for key in ("allow", "ask", "deny"):
-                rule_list = perms.get(key, [])
-                if isinstance(rule_list, list) and rule_list:
-                    items = ", ".join(f'"{r}"' for r in rule_list)
-                    lines.append(f"{key} = [{items}]")
-                else:
-                    lines.append(f"{key} = []")
-            lines.append("")
-
-        themes = data.get("themes", {})
-        if isinstance(themes, dict) and themes:
-            for tname, tdict in themes.items():
-                if isinstance(tdict, dict):
-                    lines.append(f"[themes.{tname}]")
-                    for tk, tv in tdict.items():
-                        if isinstance(tv, bool):
-                            lines.append(f"{tk} = {str(tv).lower()}")
-                        else:
-                            lines.append(f'{tk} = "{tv}"')
-                    lines.append("")
-
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines).strip() + "\n")
+        fd, tmp_path = tempfile.mkstemp(dir=CONFIG_PATH.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                tomli_w.dump(data, f)
+            Path(tmp_path).replace(CONFIG_PATH)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                Path(tmp_path).unlink()
+            raise
         return True
     except Exception:
         logger.exception("Failed writing config to %s", CONFIG_PATH)
         return False
 
 
-def save_theme_preference(name: str) -> bool:
+
+def save_theme_preference(name: str, config_path: Path | None = None) -> bool:
     """Save global theme preference to ~/.dcoder/config.toml."""
-    data = _read_config_toml_data()
-    ui = data.setdefault("ui", {})
-    if not isinstance(ui, dict):
-        ui = {}
-        data["ui"] = ui
-    ui["theme"] = name
-    return _write_config_toml_data(data)
+    from dcoder.config.toml_config import save_theme_preference as _save
+    return _save(name, config_path=config_path or CONFIG_PATH)
 
 
 def save_terminal_theme_mapping(term_program: str, name: str) -> bool:
@@ -662,8 +618,15 @@ def get_css_variable_defaults(
         "tool": c.tool,
         "tool-hover": c.tool_hover,
         "plan-add": c.plan_add,
+        "plan-change": c.plan_change,
         "plan-destroy": c.plan_destroy,
+        "ctx-prod": c.ctx_prod,
+        "ctx-nonprod": c.ctx_nonprod,
+        "status-ok": c.status_ok,
+        "status-warn": c.status_warn,
+        "status-danger": c.status_danger,
     }
+
 
 
 def _colors_from_textual_theme(app: object) -> ThemeColors:

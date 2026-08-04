@@ -16,7 +16,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_STATE_DIR = Path.home() / ".dcoder" / ".state"
+from dcoder.config.paths import STATE_DIR as _STATE_DIR
 _DEFAULT_AGENT_FILE = _STATE_DIR / "default_agent.json"
 
 # The two modes the LangGraph server supports
@@ -35,53 +35,29 @@ def get_available_agent_names() -> list[str]:
     return list(AVAILABLE_AGENTS)
 
 
-def load_default_agent() -> str | None:
-    """Load the persisted default agent name.
+from dcoder.config.toml_config import (
+    clear_default_agent as clear_default_agent,
+    load_default_agent as _toml_load_default_agent,
+    load_recent_agent as load_recent_agent,
+    save_default_agent as save_default_agent,
+    save_recent_agent as save_recent_agent,
+)
 
-    Returns:
-        Agent name string, or ``None`` if no default is saved.
-    """
+
+def load_default_agent() -> str | None:
+    """Load the persisted default agent name from config.toml or fallbacks."""
+    default_agent = _toml_load_default_agent()
+    if default_agent:
+        return default_agent
+    recent_agent = load_recent_agent()
+    if recent_agent:
+        return recent_agent
     try:
         if _DEFAULT_AGENT_FILE.exists():
             data = json.loads(_DEFAULT_AGENT_FILE.read_text(encoding="utf-8"))
             if isinstance(data, dict) and "agent" in data:
                 return str(data["agent"])
     except Exception:
-        logger.debug("Failed to load default agent", exc_info=True)
+        logger.debug("Failed to load default agent fallback", exc_info=True)
     return None
 
-
-def save_default_agent(agent_name: str) -> bool:
-    """Persist the user's default agent.
-
-    Args:
-        agent_name: Agent name to save as default.
-
-    Returns:
-        ``True`` if saved successfully.
-    """
-    try:
-        _STATE_DIR.mkdir(parents=True, exist_ok=True)
-        _DEFAULT_AGENT_FILE.write_text(
-            json.dumps({"agent": agent_name}, indent=2),
-            encoding="utf-8",
-        )
-        return True
-    except Exception:
-        logger.debug("Failed to save default agent", exc_info=True)
-        return False
-
-
-def clear_default_agent() -> bool:
-    """Remove the saved default agent.
-
-    Returns:
-        ``True`` if cleared successfully (or already absent).
-    """
-    try:
-        if _DEFAULT_AGENT_FILE.exists():
-            _DEFAULT_AGENT_FILE.unlink()
-        return True
-    except Exception:
-        logger.debug("Failed to clear default agent", exc_info=True)
-        return False

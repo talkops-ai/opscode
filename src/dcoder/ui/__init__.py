@@ -11,8 +11,7 @@ from dcoder.ui.approval import (
     ApprovalModalScreen,
     assess_tool_risk,
 )
-from dcoder.ui.ask_user import AskQuestion, AskUserMenu, AskUserResponse
-from dcoder.ui.autocomplete import AutocompletePopup
+from dcoder.ui.ask_user import AskUserMenu
 from dcoder.ui.chat_input import ChatInput
 from dcoder.ui.devops_renderers import TerraformPlanWidget
 from dcoder.ui.diff import compose_diff_lines
@@ -46,11 +45,8 @@ __all__ = [
     "ApprovalDecided",
     "ApprovalMenu",
     "ApprovalModalScreen",
-    "AskQuestion",
     "AskUserMenu",
-    "AskUserResponse",
     "AssistantMessage",
-    "AutocompletePopup",
     "ChatInput",
     "DCoderApp",
     "DiffMessage",

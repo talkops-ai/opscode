@@ -20,7 +20,7 @@ from dcoder.plugins.adapters.skills import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from deepagents.backends.protocol import BACKEND_TYPES, BackendProtocol
+    from deepagents.backends.protocol import BackendProtocol
     from langchain_core.runnables import RunnableConfig
     from langgraph.runtime import Runtime
 
@@ -127,17 +127,25 @@ def load_namespaced_skills(
     return skills
 
 
+@register_middleware(name="skills")
 class PluginSkillsMiddleware(SkillsMiddleware):
-    """Load namespaced plugin skills without extending the SDK source API."""
-
+    """Load namespaced plugin skills with optional whitelist filtering for subagent scoping."""
 
     def __init__(
         self,
         *,
-        backend: BACKEND_TYPES,
-        sources: Sequence[tuple[str, ...]],
+        backend: BackendProtocol | None = None,
+        sources: Sequence[tuple[str, ...]] | None = None,
         system_prompt: str | None = sdk_skills.SKILLS_SYSTEM_PROMPT,
+        allowed_skills: Sequence[str] | None = None,
     ) -> None:
+        if backend is None:
+            from deepagents.backends.filesystem import FilesystemBackend
+            backend = FilesystemBackend(virtual_mode=False)
+        if sources is None:
+            from dcoder.skills.registry import SkillRegistry
+            sources = SkillRegistry.get_instance().get_sources_for_middleware()
+
         sdk_sources = [(source[0], source[1]) for source in sources]
         super().__init__(
             backend=backend,
@@ -148,6 +156,16 @@ class PluginSkillsMiddleware(SkillsMiddleware):
             source[2] if len(source) == _PLUGIN_SKILL_SOURCE_LENGTH else None
             for source in sources
         )
+        self._allowed_skills = tuple(allowed_skills) if allowed_skills is not None else None
+
+    def _is_skill_allowed(self, skill_name: str) -> bool:
+        if self._allowed_skills is None:
+            return True
+        import fnmatch
+        for pattern in self._allowed_skills:
+            if fnmatch.fnmatch(skill_name, pattern) or fnmatch.fnmatch(skill_name.lower(), pattern.lower()):
+                return True
+        return False
 
     def before_agent(
         self,
@@ -158,7 +176,7 @@ class PluginSkillsMiddleware(SkillsMiddleware):
         if "skills_metadata" in state:
             return None
 
-        backend = self._get_backend(state, runtime, config)
+        backend: BackendProtocol = cast("BackendProtocol", self._backend)
         all_skills: dict[str, sdk_skills.SkillMetadata] = {}
         errors: list[str] = []
 
@@ -174,10 +192,22 @@ class PluginSkillsMiddleware(SkillsMiddleware):
             else:
                 source_skills = load_namespaced_skills(backend, source_path, namespace)
             for skill in source_skills:
-                all_skills[str(skill["name"])] = skill
+                skill_name = skill["name"]
+                if self._is_skill_allowed(skill_name):
+                    all_skills[skill_name] = skill
 
         update = sdk_skills.SkillsStateUpdate(skills_metadata=list(all_skills.values()))
         if errors:
             logger.warning("Skills load errors: %s", errors)
             update["skills_load_errors"] = errors
         return update
+
+    async def abefore_agent(
+        self,
+        state: sdk_skills.SkillsState,
+        runtime: Runtime,
+        config: RunnableConfig,
+    ) -> sdk_skills.SkillsStateUpdate | None:
+        import asyncio
+        return await asyncio.to_thread(self.before_agent, state, runtime, config)
+

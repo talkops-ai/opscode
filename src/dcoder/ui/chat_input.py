@@ -7,7 +7,9 @@ and mode-reactive prompt glyph (❯ / / / $) with visual feedback.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+from pathlib import Path
 from typing import Any, ClassVar, Literal, Self
 
 from rich.cells import cell_len
@@ -22,7 +24,15 @@ from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import Static, TextArea
 
-from dcoder.ui.autocomplete import AutocompletePopup
+from dcoder.ui.autocomplete import (
+    CompletionResult,
+    FuzzyFileController,
+    MultiCompletionManager,
+    SlashCommandController,
+)
+from textual.events import Click
+from textual.containers import VerticalScroll
+from textual.content import Content
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +67,286 @@ def detect_input_mode(text: str) -> InputMode:
 
 # Dim style used for inline argument hint ghost text.
 _HINT_STYLE = Style(color="grey50", italic=True)
+
+
+class CompletionOption(Static):
+    """A clickable completion option in the autocomplete popup."""
+
+    DEFAULT_CSS = """
+    CompletionOption {
+        height: 1;
+        padding: 0 1;
+    }
+
+    CompletionOption:hover {
+        background: $surface-lighten-1;
+    }
+
+    CompletionOption.completion-option-selected {
+        background: $primary;
+        color: $background;
+        text-style: bold;
+    }
+
+    CompletionOption.completion-option-selected:hover {
+        background: $primary-lighten-1;
+    }
+    """
+
+    class Clicked(Message):
+        """Message sent when a completion option is clicked."""
+
+        def __init__(self, index: int) -> None:
+            """Initialize with the clicked option index."""
+            super().__init__()
+            self.index = index
+
+    def __init__(
+        self,
+        label: str,
+        description: str,
+        index: int,
+        is_selected: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the completion option.
+
+        Args:
+            label: The main label text (e.g., command name or file path)
+            description: Secondary description text
+            index: Index of this option in the suggestions list
+            is_selected: Whether this option is currently selected
+            **kwargs: Additional arguments for parent
+        """
+        super().__init__(**kwargs)
+        self._label = label
+        self._description = description
+        self._index = index
+        self._is_selected = is_selected
+
+    def on_mount(self) -> None:
+        """Set up the option display on mount."""
+        self._update_display()
+
+    def _update_display(self) -> None:
+        """Update the display text and styling."""
+        display_label = self._label.removeprefix("/")
+        if self._description:
+            content = Content.from_markup(
+                "[bold]$label[/bold]  [dim]$desc[/dim]",
+                label=display_label,
+                desc=self._description,
+            )
+        else:
+            content = Content.from_markup("[bold]$label[/bold]", label=display_label)
+
+        self.update(content)
+
+        if self._is_selected:
+            self.add_class("completion-option-selected")
+        else:
+            self.remove_class("completion-option-selected")
+
+    def set_selected(self, *, selected: bool) -> None:
+        """Update the selected state of this option."""
+        if self._is_selected != selected:
+            self._is_selected = selected
+            self._update_display()
+
+    def set_content(
+        self, label: str, description: str, index: int, *, is_selected: bool
+    ) -> None:
+        """Replace label, description, index, and selection in-place."""
+        self._label = label
+        self._description = description
+        self._index = index
+        self._is_selected = is_selected
+        self._update_display()
+
+    def on_click(self, event: Click) -> None:
+        """Handle click on this option."""
+        event.stop()
+        self.post_message(self.Clicked(self._index))
+
+
+class CompletionPopup(VerticalScroll):
+    """Popup widget that displays completion suggestions as clickable options."""
+
+    DEFAULT_CSS = """
+    CompletionPopup {
+        display: none;
+        height: auto;
+        max-height: 12;
+    }
+    """
+
+    class OptionClicked(Message):
+        """Message sent when a completion option is clicked."""
+
+        def __init__(self, index: int) -> None:
+            """Initialize with the clicked option index."""
+            super().__init__()
+            self.index = index
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialize the completion popup."""
+        super().__init__(**kwargs)
+        self.can_focus = False
+        self._options: list[CompletionOption] = []
+        self._selected_index = 0
+        self._pending_suggestions: list[tuple[str, str]] = []
+        self._pending_selected: int = 0
+        self._rebuild_generation: int = 0
+
+    def update_suggestions(
+        self, suggestions: list[tuple[str, str]], selected_index: int
+    ) -> None:
+        """Update the popup with new suggestions."""
+        if not suggestions:
+            self.hide()
+            return
+
+        self._selected_index = selected_index
+        self._pending_suggestions = suggestions
+        self._pending_selected = selected_index
+        # Increment generation so stale callbacks from prior calls are skipped.
+        self._rebuild_generation += 1
+        gen = self._rebuild_generation
+        # show() is still deferred to _rebuild_options to avoid stale content,
+        # but the rebuild runs before the next paint so prompt and popup changes
+        # appear in the same frame.
+        self.call_next(lambda: self._rebuild_options(gen))
+
+    async def _rebuild_options(self, generation: int) -> None:
+        """Rebuild option widgets from pending suggestions.
+
+        Reuses existing DOM nodes where possible to avoid flicker from
+        a full teardown/mount cycle while the popup is visible.
+
+        Args:
+            generation: Caller's generation counter; skipped if superseded.
+        """
+        if generation != self._rebuild_generation:
+            return
+
+        suggestions = self._pending_suggestions
+        selected_index = self._pending_selected
+
+        if not suggestions:
+            self.hide()
+            return
+
+        existing = len(self._options)
+        needed = len(suggestions)
+
+        # Update existing widgets in-place
+        for i in range(min(existing, needed)):
+            label, desc = suggestions[i]
+            self._options[i].set_content(
+                label, desc, i, is_selected=(i == selected_index)
+            )
+
+        # DOM mutations: trim extras / mount new widgets
+        try:
+            if existing > needed:
+                for option in self._options[needed:]:
+                    await option.remove()
+                del self._options[needed:]
+
+            if needed > existing:
+                new_widgets: list[CompletionOption] = []
+                for idx in range(existing, needed):
+                    label, desc = suggestions[idx]
+                    option = CompletionOption(
+                        label=label,
+                        description=desc,
+                        index=idx,
+                        is_selected=(idx == selected_index),
+                    )
+                    new_widgets.append(option)
+                self._options.extend(new_widgets)
+                await self.mount(*new_widgets)
+        except Exception:
+            logger.exception("Failed to rebuild completion popup; hiding to recover")
+            self._options = []
+            with contextlib.suppress(Exception):
+                await self.remove_children()
+            self.hide()
+            return
+
+        # The DOM mutations above can await, during which a hide() (or a newer
+        # rebuild) bumps the generation to cancel this one. The top-of-function
+        # guard ran before that await, so re-check here: without it a stale
+        # rebuild would re-show a popup that was dismissed mid-flight (e.g. when
+        # a completion is applied and the popup hidden in the same key press).
+        if generation != self._rebuild_generation:
+            return
+
+        self.show()
+
+        if 0 <= selected_index < len(self._options):
+            self._options[selected_index].scroll_visible()
+
+    def update_selection(self, selected_index: int) -> None:
+        """Update which option is selected without rebuilding the list."""
+        # Keep pending state in sync so an in-flight _rebuild_options uses
+        # the latest selection.
+        self._pending_selected = selected_index
+
+        if self._selected_index == selected_index:
+            return
+
+        # Deselect previous
+        if 0 <= self._selected_index < len(self._options):
+            self._options[self._selected_index].set_selected(selected=False)
+
+        # Select new
+        self._selected_index = selected_index
+        if 0 <= selected_index < len(self._options):
+            self._options[selected_index].set_selected(selected=True)
+            self._options[selected_index].scroll_visible()
+
+    def on_completion_option_clicked(self, event: CompletionOption.Clicked) -> None:
+        """Handle click on a completion option."""
+        event.stop()
+        self.post_message(self.OptionClicked(event.index))
+
+    def hide(self) -> None:
+        """Hide the popup."""
+        self._pending_suggestions = []
+        self._rebuild_generation += 1  # Cancel any in-flight rebuild
+        self.styles.display = "none"  # ty: ignore[invalid-assignment]  # Textual accepts string display values at runtime
+
+    def show(self) -> None:
+        """Show the popup."""
+        self.styles.display = "block"
+
+
+class _CompletionViewAdapter:
+    """Translate completion-space replacements to text-area coordinates."""
+
+    def __init__(self, chat_input: ChatInput) -> None:
+        """Initialize adapter with its owning `ChatInput`."""
+        self._chat_input = chat_input
+
+    def render_completion_suggestions(
+        self, suggestions: list[tuple[str, str]], selected_index: int
+    ) -> None:
+        self._chat_input._autocomplete.update_suggestions(suggestions, selected_index)
+
+    def clear_completion_suggestions(self) -> None:
+        self._chat_input._autocomplete.hide()
+
+    def replace_completion_range(self, start: int, end: int, replacement: str) -> None:
+        text_area = self._chat_input._text_area
+        current = text_area.text
+        start = max(0, min(start, len(current)))
+        end = max(0, min(end, len(current)))
+        new_text = current[:start] + replacement + current[end:]
+        text_area.text = new_text
+        text_area.cursor_location = text_area.document.get_location_from_index(  # type: ignore
+            start + len(replacement)
+        )
 
 
 class ChatTextArea(TextArea):
@@ -245,15 +535,34 @@ class ChatInput(Widget):
         super().__init__(**kwargs)
         self._prompt_widget = Static("❯", id="input-prompt", classes="input-prompt")
         self._text_area = ChatTextArea(id="chat-text-area")
-        self._autocomplete = AutocompletePopup()
+        self._autocomplete = CompletionPopup(id="completion-popup")
         self._history: list[str] = []
         self._history_index: int = -1
         self._saved_draft: str = ""
         self._pasted_full_text: str | None = None
+        self._cwd = Path.cwd()
         # Maps command name (without leading /) to argument_hint string.
         self._argument_hints: dict[str, str] = {}
         self._rebuild_argument_hints()
 
+
+    def on_mount(self) -> None:
+        self._completion_view = _CompletionViewAdapter(self)
+        from dcoder.ui.command_registry import get_all_entries
+        self._file_controller = FuzzyFileController(self._completion_view, cwd=self._cwd)
+        self._slash_controller = SlashCommandController(get_all_entries(), self._completion_view)
+        self._completion_manager = MultiCompletionManager([
+            self._slash_controller,
+            self._file_controller,
+        ])
+        
+        # Warm file cache in background
+        self.run_worker(
+            self._file_controller.warm_cache(force=False),
+            exclusive=False,
+            group="file_cache",
+            exit_on_error=False,
+        )
     def compose(self) -> ComposeResult:
         from textual.containers import Horizontal, Vertical
         with Vertical(id="input-box"):
@@ -272,12 +581,11 @@ class ChatInput(Widget):
     def text(self, value: str) -> None:
         self._text_area.text = value
         self._sync_mode()
-        self._check_slash_command()
 
     def clear(self) -> None:
         self._text_area.clear()
         self._pasted_full_text = None
-        self._autocomplete.hide_popup()
+        self._completion_manager.reset()
         self.mode = "normal"
 
     def focus(self, scroll_visible: bool = True) -> Self:
@@ -319,24 +627,22 @@ class ChatInput(Widget):
         """Handle key presses — intercept submit/history, delegate rest to TextArea."""
         key = event.key
 
-        # Check inline autocomplete popup interactions first
-        popup = self._autocomplete
-        if popup.is_visible:
-            if key == "up":
-                event.prevent_default()
-                event.stop()
-                popup.select_prev()
-                return True
-            if key == "down":
-                event.prevent_default()
-                event.stop()
-                popup.select_next()
-                return True
-            if key in ("enter", "tab"):
-                event.prevent_default()
-                event.stop()
-                popup.accept_selected(by_enter=(key == "enter"))
-                return True
+        # Delegate to completion manager
+        cursor_idx = self._text_area.cursor_location[1] # Only works if single line or at end. Actually, textual TextArea has get_cursor_location_from_index or similar? Wait, the reference chat_input handles this differently. Let's just calculate index.
+        lines = self._text_area.document.lines
+        cursor_row, cursor_col = self._text_area.cursor_location
+        cursor_index = sum(len(line) + 1 for line in lines[:cursor_row]) + cursor_col
+        
+        result = self._completion_manager.on_key(event, self.text, cursor_index)
+        if result == CompletionResult.HANDLED:
+            event.prevent_default()
+            event.stop()
+            return True
+        elif result == CompletionResult.SUBMIT:
+            event.prevent_default()
+            event.stop()
+            self._submit_value()
+            return True
 
         # Submit on Enter (not shift+enter)
         if key == "enter":
@@ -374,7 +680,12 @@ class ChatInput(Widget):
 
     def _after_key_sync(self) -> None:
         self._sync_mode()
-        self._check_slash_command()
+        
+        lines = self._text_area.document.lines
+        cursor_row, cursor_col = self._text_area.cursor_location
+        cursor_index = sum(len(line) + 1 for line in lines[:cursor_row]) + cursor_col
+        
+        self._completion_manager.on_text_changed(self.text, cursor_index)
         self._update_argument_hint()
 
     # ── Mode Detection ──────────────────────────────────
@@ -384,19 +695,6 @@ class ChatInput(Widget):
         new_mode = detect_input_mode(self.text)
         if new_mode != self.mode:
             self.mode = new_mode
-
-    def _check_slash_command(self) -> None:
-        """Detect if input is slash command context and show/hide inline autocomplete."""
-        current = self.text
-        if self.mode == "command" or current.startswith("/"):
-            query = current if current.startswith("/") else f"/{current}"
-            query = query.split(maxsplit=1)[0]
-            self._autocomplete.filter_query(query)
-            self._autocomplete.show_popup()
-            self.post_message(self.SlashCommandStarted(query))
-        else:
-            self._autocomplete.hide_popup()
-            self.post_message(self.SlashCommandEnded())
 
     # ── Argument Hint Ghost Text ────────────────────────
 

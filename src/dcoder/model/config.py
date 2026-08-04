@@ -13,7 +13,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, TypedDict, cast
 
 from dcoder.config.settings import resolve_env_var
-from dcoder.config.manifest import DEFAULT_CONFIG_PATH
+from dcoder.config.paths import CONFIG_PATH as DEFAULT_CONFIG_PATH
 from dcoder.exceptions import ModelConfigError
 
 logger = logging.getLogger("dcoder")
@@ -427,7 +427,7 @@ def has_provider_credentials(provider: str) -> bool | None:
 
 
 def apply_stored_credentials(provider: str) -> bool:
-    """Export stored provider API key and env vars from dotenv/credentials.env to os.environ.
+    """Export stored provider API key and env vars from ~/.dcoder/.env to os.environ.
 
     LangChain model factories read credentials from process env vars.
     Returns True if credentials were set/found in environment, False otherwise.
@@ -497,11 +497,11 @@ def revoke_provider_credentials(provider: str | None = None, settings: Any | Non
     """Revoke stored credentials for a specified provider, or all providers if provider is None or 'all'.
 
     Clears process environment variables, settings instance fields, and removes
-    credential lines from ~/.dcoder/.state/credentials.env and ~/.dcoder/.env files.
+    credential lines from ~/.dcoder/.env file.
 
     Returns a list of provider names whose credentials were revoked.
     """
-    from dcoder.config.manifest import DEFAULT_CONFIG_DIR
+    from dcoder.config.paths import DATA_DIR, GLOBAL_ENV_PATH
 
     target_providers: list[str] = []
     if provider and provider.lower() not in ("all", "*", ""):
@@ -540,8 +540,7 @@ def revoke_provider_credentials(provider: str | None = None, settings: Any | Non
 
     # Clean disk env files
     cred_files = [
-        DEFAULT_CONFIG_DIR / ".state" / "credentials.env",
-        DEFAULT_CONFIG_DIR / ".env",
+        GLOBAL_ENV_PATH,
     ]
     for cfile in cred_files:
         if cfile.is_file():
@@ -1323,10 +1322,18 @@ def get_available_models_list() -> list[tuple[str, str, str]]:
 
 # ── Recent / Default model persistence ───────────────────
 
-_STATE_DIR = Path.home() / ".dcoder" / ".state"
-_RECENT_MODELS_FILE = _STATE_DIR / "recent_models.json"
+from dcoder.config.paths import STATE_DIR as _STATE_DIR, RECENT_MODELS_PATH as _RECENT_MODELS_FILE
 _DEFAULT_MODEL_FILE = _STATE_DIR / "default_model.json"
 _MAX_RECENT = 10
+
+
+from dcoder.config.toml_config import (
+    clear_default_model as clear_default_model,
+    load_default_model as _toml_load_default_model,
+    load_recent_model as _toml_load_recent_model,
+    save_default_model as save_default_model,
+    save_recent_model as save_recent_model,
+)
 
 
 def load_recent_models() -> list[str]:
@@ -1336,56 +1343,29 @@ def load_recent_models() -> list[str]:
             data = json.loads(_RECENT_MODELS_FILE.read_text(encoding="utf-8"))
             if isinstance(data, list):
                 return [str(s) for s in data[:_MAX_RECENT]]
+            elif isinstance(data, dict) and isinstance(data.get("models"), list):
+                return [str(s) for s in data["models"][:_MAX_RECENT]]
     except Exception:
         logger.debug("Failed to load recent models", exc_info=True)
     return []
 
 
-def save_recent_model(spec: str) -> None:
-    """Persist a model spec to the recent-models MRU list."""
-    try:
-        _STATE_DIR.mkdir(parents=True, exist_ok=True)
-        recent = load_recent_models()
-        recent = [s for s in recent if s != spec]
-        recent.insert(0, spec)
-        recent = recent[:_MAX_RECENT]
-        _RECENT_MODELS_FILE.write_text(
-            json.dumps(recent, indent=2), encoding="utf-8"
-        )
-    except Exception:
-        logger.debug("Failed to save recent model", exc_info=True)
-
-
 def load_default_model() -> str | None:
-    """Load the user's saved default model spec."""
+    """Load the user's saved default model spec from config.toml or recent/state fallbacks."""
+    default_spec = _toml_load_default_model()
+    if default_spec:
+        return default_spec
+    recent_spec = _toml_load_recent_model()
+    if recent_spec:
+        return recent_spec
     try:
         if _DEFAULT_MODEL_FILE.exists():
             data = json.loads(_DEFAULT_MODEL_FILE.read_text(encoding="utf-8"))
             if isinstance(data, dict) and "spec" in data:
                 return str(data["spec"])
     except Exception:
-        logger.debug("Failed to load default model", exc_info=True)
+        logger.debug("Failed to load default model fallback", exc_info=True)
     return None
-
-
-def save_default_model(spec: str) -> None:
-    """Set the user's default model."""
-    try:
-        _STATE_DIR.mkdir(parents=True, exist_ok=True)
-        _DEFAULT_MODEL_FILE.write_text(
-            json.dumps({"spec": spec}, indent=2), encoding="utf-8"
-        )
-    except Exception:
-        logger.debug("Failed to save default model", exc_info=True)
-
-
-def clear_default_model() -> None:
-    """Remove the saved default model."""
-    try:
-        if _DEFAULT_MODEL_FILE.exists():
-            _DEFAULT_MODEL_FILE.unlink()
-    except Exception:
-        logger.debug("Failed to clear default model", exc_info=True)
 
 
 def resolve_model_spec(spec: str | None) -> tuple[str, str]:
@@ -1396,6 +1376,7 @@ def resolve_model_spec(spec: str | None) -> tuple[str, str]:
         provider, model_id = spec.split(":", 1)
         return provider.lower(), model_id
     return "openai", spec
+
 
 
 def format_token_count(count: int) -> str:
