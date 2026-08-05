@@ -116,6 +116,11 @@ def _load_dotenv(*, start_path: Path | None = None, refresh_loaded: bool = False
         if v is not None:
             if refresh_loaded or k not in os.environ:
                 os.environ[k] = v
+                
+    # Re-apply log configuration (in case .env enabled debug or changed level)
+    # The initial install ran at package import, but .env overrides it here.
+    from dcoder._debug import configure_debug_logging
+    configure_debug_logging(logging.getLogger("dcoder"))
 
 # ── Project Root Detection ───────────────────────────────
 

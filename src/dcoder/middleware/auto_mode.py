@@ -77,7 +77,7 @@ class AutoModeHITLMiddleware(HumanInTheLoopMiddleware[AgentState[Any], Any, Any]
             )
 
         calls = list(getattr(ai_message, "tool_calls", []))
-        gated_calls = [call for call in calls if call["name"] in self.interrupt_on]
+        gated_calls = [call for call in calls if call and isinstance(call, dict) and call.get("name") in self.interrupt_on]
         if not gated_calls:
             return response
 

@@ -58,6 +58,9 @@ from dcoder.ui.tool_display import (
     format_tool_display,
 )
 EXECUTE_HEADER_MAX_LENGTH = 100
+
+_TOOL_GROUP_EXCLUSIONS = frozenset({"ask_user", "edit_file", "write_to_file", "replace_file_content", "write_todos"})
+"""Tools that stay expanded instead of collapsing into step summaries."""
 from dcoder.ui.diff import compose_diff_lines
 
 if TYPE_CHECKING:
@@ -3789,20 +3792,21 @@ class MessageList(VerticalScroll):
             self._scroll_to_end()
 
     def add_tool_call(
-        self, name: str, call_id: str, args: dict[str, Any]
+        self, name: str, call_id: str, args: dict[str, Any], live: bool = True
     ) -> None:
         """Add a tool-call widget."""
         msg = ToolCallMessage(name, args)
         self._tool_calls[call_id] = msg
-        if self._active_tool_group is None or not self._active_tool_group.is_attached:
-            self._active_tool_group = ToolGroupSummary(live=True)
-            self.mount(self._active_tool_group)
+        if live and name not in _TOOL_GROUP_EXCLUSIONS:
+            if self._active_tool_group is None or not self._active_tool_group.is_attached:
+                self._active_tool_group = ToolGroupSummary(live=True)
+                self.mount(self._active_tool_group)
+            self._active_tool_group.add_member(msg)
         self.mount(msg)
-        self._active_tool_group.add_member(msg)
         self._scroll_to_end()
 
     def update_tool_result(
-        self, call_id: str, result: str, success: bool = True, name: str | None = None
+        self, call_id: str, result: str, success: bool = True, name: str | None = None, live: bool = True
     ) -> None:
         """Update a tool-call widget with its result."""
         if call_id and call_id in self._tool_calls:
@@ -3816,11 +3820,12 @@ class MessageList(VerticalScroll):
             msg = ToolCallMessage(msg_name, {})
             if call_id:
                 self._tool_calls[call_id] = msg
-            if self._active_tool_group is None or not self._active_tool_group.is_attached:
-                self._active_tool_group = ToolGroupSummary(live=True)
-                self.mount(self._active_tool_group)
+            if live and msg_name not in _TOOL_GROUP_EXCLUSIONS:
+                if self._active_tool_group is None or not self._active_tool_group.is_attached:
+                    self._active_tool_group = ToolGroupSummary(live=True)
+                    self.mount(self._active_tool_group)
+                self._active_tool_group.add_member(msg)
             self.mount(msg)
-            self._active_tool_group.add_member(msg)
             if success:
                 msg.set_success(result)
             else:
@@ -3852,6 +3857,7 @@ class MessageList(VerticalScroll):
         self.remove_children()
         self._current_assistant = None
         self._tool_calls.clear()
+        self._active_tool_group = None
 
     def set_timestamps_visible(self, visible: bool) -> None:
         """Show or hide timestamp footers across all mounted messages."""

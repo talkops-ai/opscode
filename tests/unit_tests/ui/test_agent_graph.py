@@ -40,11 +40,18 @@ async def test_make_graph():
     os.environ[f"{prefix}AUTO_APPROVE"] = "true"
     os.environ[f"{prefix}INTERACTIVE"] = "false"
 
+    from unittest.mock import patch
+    
     os.environ["OPENAI_API_KEY"] = "mock-key"
     try:
-        # Resolve make_graph
-        graph = await make_graph()
-        assert isinstance(graph, Pregel)
+        with patch("dcoder.server.server_graph.logger") as mock_logger:
+            # Resolve make_graph
+            graph = await make_graph()
+            assert isinstance(graph, Pregel)
+            
+            # Assert no tools failed to build
+            for call in mock_logger.warning.call_args_list:
+                assert "Failed to build registered tool" not in call[0][0]
     finally:
         os.environ.pop("OPENAI_API_KEY", None)
         os.environ.pop(f"{prefix}ASSISTANT_ID", None)

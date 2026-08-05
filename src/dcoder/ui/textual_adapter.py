@@ -367,6 +367,7 @@ class TextualAdapter:
 
                 interrupt_occurred = False
                 resume_payload: dict[str, Any] = {}
+                pending_interrupts: list[tuple[str, Any]] = []
 
                 # Show the Thinking spinner before each astream iteration
                 if self._set_spinner and not getattr(self, "_current_tool_messages", {}):
@@ -396,17 +397,18 @@ class TextualAdapter:
                         pass
 
                     elif current_stream_mode == "updates":
+                        if not isinstance(data, dict):
+                            continue
                         interrupts = data.get("__interrupt__")
                         if interrupts:
                             interrupt_occurred = True
-                            if not isinstance(interrupts, tuple):
-                                interrupts = (interrupts,)
-                            for interrupt in interrupts:
-                                interrupt_id = interrupt.get("interrupt_id")
-                                interrupt_val = interrupt.get("interrupt_value")
+                            for interrupt_obj in interrupts:
+                                interrupt_id = getattr(interrupt_obj, "id", None)
+                                interrupt_val = getattr(interrupt_obj, "value", None)
+                                
                                 if interrupt_val and interrupt_id:
                                     logger.debug("TUI: Handle interrupt %s: %s", interrupt_id, interrupt_val)
-                                    resume_payload[interrupt_id] = None
+                                    pending_interrupts.append((interrupt_id, interrupt_val))
                                     
                     elif current_stream_mode == "messages":
                         msg_obj, meta = data if isinstance(data, tuple) else (data, {})
@@ -509,7 +511,28 @@ class TextualAdapter:
                 if self._messages is not None:
                     self._messages.finish_assistant_message()
                     
-                if interrupt_occurred and resume_payload:
+                if pending_interrupts:
+                    for int_id, int_val in pending_interrupts:
+                        action_requests = int_val.get("action_requests", [])
+                        call_ids = []
+                        for i, req in enumerate(action_requests):
+                            call_id = f"{int_id}_{i}"
+                            call_ids.append(call_id)
+                            if self._app:
+                                self._app.post_message(
+                                    self.InterruptRaised(
+                                        tool_name=req.get("action") or req.get("name", "unknown"),
+                                        call_id=call_id,
+                                        args=req.get("args", {})
+                                    )
+                                )
+                        if call_ids:
+                            approved_results = await asyncio.gather(*(self._await_approval(cid) for cid in call_ids))
+                            decisions = [{"type": "approve" if approved else "reject"} for approved in approved_results]
+                        else:
+                            decisions = []
+                        resume_payload[int_id] = {"decisions": decisions}
+                        
                     from langgraph.types import Command
                     stream_input = Command(resume=resume_payload)
                     continue

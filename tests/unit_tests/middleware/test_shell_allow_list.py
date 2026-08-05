@@ -15,6 +15,7 @@ class TestShellAllowListValidation:
         """Non-execute tools are never intercepted."""
         middleware = ShellAllowListMiddleware(allow_list=["ls"])
         req = MagicMock()
+        req.action = None
         req.tool_call = {"name": "read_file", "args": {"path": "/foo"}, "id": "tc1"}
         assert middleware._validate_tool_call(req) is None
 
@@ -22,6 +23,7 @@ class TestShellAllowListValidation:
         """An empty allow-list rejects all shell commands."""
         middleware = ShellAllowListMiddleware(allow_list=[])
         req = MagicMock()
+        req.action = None
         req.tool_call = {"name": "execute", "args": {"command": "ls"}, "id": "tc1"}
         result = middleware._validate_tool_call(req)
         assert isinstance(result, ToolMessage)
@@ -32,6 +34,7 @@ class TestShellAllowListValidation:
         """A command matching the allow-list is allowed through."""
         middleware = ShellAllowListMiddleware(allow_list=["ls", "cat", "grep"])
         req = MagicMock()
+        req.action = None
         req.tool_call = {"name": "execute", "args": {"command": "ls -la"}, "id": "tc1"}
         assert middleware._validate_tool_call(req) is None
 
@@ -39,6 +42,7 @@ class TestShellAllowListValidation:
         """A command NOT in the allow-list is blocked."""
         middleware = ShellAllowListMiddleware(allow_list=["ls"])
         req = MagicMock()
+        req.action = None
         req.tool_call = {"name": "execute", "args": {"command": "rm -rf /"}, "id": "tc1"}
         result = middleware._validate_tool_call(req)
         assert isinstance(result, ToolMessage)
@@ -51,6 +55,7 @@ class TestShellAllowListValidation:
             allow_list=["terraform validate", "terraform fmt", "helm lint"]
         )
         req = MagicMock()
+        req.action = None
         req.tool_call = {
             "name": "execute",
             "args": {"command": "terraform validate -json"},
@@ -62,6 +67,7 @@ class TestShellAllowListValidation:
         """In compound commands (&&), every segment must match."""
         middleware = ShellAllowListMiddleware(allow_list=["ls", "cat"])
         req = MagicMock()
+        req.action = None
         req.tool_call = {
             "name": "execute",
             "args": {"command": "ls -la && cat file.txt"},
@@ -73,6 +79,7 @@ class TestShellAllowListValidation:
         """If any segment of a compound command is disallowed, block it."""
         middleware = ShellAllowListMiddleware(allow_list=["ls"])
         req = MagicMock()
+        req.action = None
         req.tool_call = {
             "name": "execute",
             "args": {"command": "ls -la && rm -rf /"},
@@ -86,6 +93,7 @@ class TestShellAllowListValidation:
         """Dangerous shell patterns like $(cmd) are blocked regardless of prefix."""
         middleware = ShellAllowListMiddleware(allow_list=["ls"])
         req = MagicMock()
+        req.action = None
         req.tool_call = {
             "name": "execute",
             "args": {"command": "ls $(whoami)"},
@@ -103,6 +111,7 @@ class TestShellAllowListWrapToolCall:
         """Allowed commands proceed to the handler."""
         middleware = ShellAllowListMiddleware(allow_list=["ls"])
         req = MagicMock()
+        req.action = None
         req.tool_call = {"name": "execute", "args": {"command": "ls"}, "id": "tc1"}
         handler = MagicMock(return_value="handler_result")
         result = middleware.wrap_tool_call(req, handler)
@@ -113,7 +122,8 @@ class TestShellAllowListWrapToolCall:
         """Blocked commands never call the handler."""
         middleware = ShellAllowListMiddleware(allow_list=["ls"])
         req = MagicMock()
-        req.tool_call = {"name": "execute", "args": {"command": "rm -rf /"}, "id": "tc1"}
+        req.action = None
+        req.tool_call = {"name": "execute", "args": {"command": "rm -rf"}, "id": "tc2"}
         handler = MagicMock()
         result = middleware.wrap_tool_call(req, handler)
         handler.assert_not_called()

@@ -84,8 +84,10 @@ class ManagedMemoryGuardMiddleware(AgentMiddleware):
             )
 
     def _guarded_path(self, request: ToolCallRequest) -> Path | None:
-        tool_name = request.tool_call["name"]
-        if tool_name not in _GUARDED_TOOLS:
+        if not getattr(request, "tool_call", None) or not isinstance(request.tool_call, dict):
+            return None
+        tool_name = request.tool_call.get("name")
+        if not tool_name or tool_name not in _GUARDED_TOOLS:
             return None
         args = request.tool_call.get("args") or {}
         
@@ -256,8 +258,8 @@ class ManagedMemoryGuardMiddleware(AgentMiddleware):
         template = _RESTORE_FAILED_MESSAGE if restore_failed else _REJECTION_MESSAGE
         return ToolMessage(
             content=template.format(path=path),
-            name=request.tool_call["name"],
-            tool_call_id=request.tool_call["id"],
+            name=request.tool_call.get("name", "unknown") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "unknown",
+            tool_call_id=request.tool_call.get("id", "") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "",
             status="error",
         )
 
@@ -271,8 +273,8 @@ class ManagedMemoryGuardMiddleware(AgentMiddleware):
     def _delete_error(request: ToolCallRequest, path: Path) -> ToolMessage:
         return ToolMessage(
             content=_DELETE_REJECTION_MESSAGE.format(path=path),
-            name=request.tool_call["name"],
-            tool_call_id=request.tool_call["id"],
+            name=request.tool_call.get("name", "unknown") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "unknown",
+            tool_call_id=request.tool_call.get("id", "") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "",
             status="error",
         )
 
@@ -300,7 +302,7 @@ class ManagedMemoryGuardMiddleware(AgentMiddleware):
         if path is None:
             return handler(request)
         before = self._read(path)
-        if request.tool_call["name"] == "delete":
+        if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) and request.tool_call.get("name") == "delete":
             if self._reject_delete(path, before):
                 return self._delete_error(request, path)
             return handler(request)
@@ -321,7 +323,7 @@ class ManagedMemoryGuardMiddleware(AgentMiddleware):
         if path is None:
             return await handler(request)
         before = await asyncio.to_thread(self._read, path)
-        if request.tool_call["name"] == "delete":
+        if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) and request.tool_call.get("name") == "delete":
             if await asyncio.to_thread(self._reject_delete, path, before):
                 return self._delete_error(request, path)
             return await handler(request)

@@ -54,7 +54,13 @@ class ToolFilterMiddleware(AgentMiddleware):
         err = self._validate_tool_call(request)
         if err is not None:
             return err
-        return handler(request)
+        try:
+            return handler(request)
+        except TypeError as e:
+            import traceback
+            logger.error("CRITICAL TYPE ERROR on tool call: %s", request)
+            logger.error("Traceback: %s", "".join(traceback.format_exception(type(e), e, e.__traceback__)))
+            raise
 
     async def awrap_tool_call(
         self,
@@ -64,4 +70,10 @@ class ToolFilterMiddleware(AgentMiddleware):
         err = self._validate_tool_call(request)
         if err is not None:
             return err
-        return await handler(request)
+        try:
+            return await handler(request)
+        except TypeError as e:
+            import traceback
+            logger.error("CRITICAL TYPE ERROR on async tool call: %s", request)
+            logger.error("Traceback: %s", "".join(traceback.format_exception(type(e), e, e.__traceback__)))
+            raise

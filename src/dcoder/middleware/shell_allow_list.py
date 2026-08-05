@@ -18,7 +18,10 @@ class ShellAllowListMiddleware(AgentMiddleware):
         self._allow_list = allow_list or []
 
     def _validate_tool_call(self, request: ToolCallRequest) -> ToolMessage | None:
-        if request.tool_call["name"] != "execute":
+        if not getattr(request, "tool_call", None) or not isinstance(request.tool_call, dict):
+            return None
+
+        if request.tool_call.get("name") != "execute":
             return None
 
         args = request.tool_call.get("args") or {}
@@ -44,7 +47,7 @@ class ShellAllowListMiddleware(AgentMiddleware):
                 f"Please use an allowed command or try another approach."
             ),
             name="execute",
-            tool_call_id=request.tool_call["id"],
+            tool_call_id=request.tool_call.get("id", "") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "",
             status="error",
         )
 

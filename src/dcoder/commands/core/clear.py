@@ -53,6 +53,8 @@ class ClearHandler(BaseCommandHandler):
                 except Exception:
                     pass
             ctx.app._agent_thread_id = new_thread_id
+            if hasattr(ctx.app, "_restore_goal_rubric_state"):
+                ctx.app._restore_goal_rubric_state({})
 
             try:
                 from dcoder.ui.status import StatusBar

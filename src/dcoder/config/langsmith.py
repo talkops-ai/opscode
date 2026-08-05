@@ -120,3 +120,26 @@ def fetch_langsmith_project_url_or_raise(project_name: str) -> str:
 
     _langsmith_url_cache = (project_name, result)
     return result
+
+def get_cached_langsmith_thread_url(thread_id: str) -> str | None:
+    """Build a LangSmith thread URL only when its project URL is cached."""
+    project_name = get_langsmith_project_name()
+    if not project_name or _langsmith_url_cache is None:
+        return None
+
+    cached_name, cached_url = _langsmith_url_cache
+    if cached_name != project_name:
+        return None
+    return _assemble_langsmith_thread_url(cached_url, thread_id)
+
+def build_langsmith_thread_url(thread_id: str) -> str | None:
+    """Build a full LangSmith thread URL if tracing is configured."""
+    project_name = get_langsmith_project_name()
+    if not project_name:
+        return None
+
+    try:
+        project_url = fetch_langsmith_project_url_or_raise(project_name)
+        return _assemble_langsmith_thread_url(project_url, thread_id)
+    except Exception:
+        return None

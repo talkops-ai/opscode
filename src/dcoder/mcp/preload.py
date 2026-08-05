@@ -91,8 +91,10 @@ async def _probe_one_server(
                 error=f"Unknown transport type: {transport_type}",
             )
 
-        # Open session, list tools, close immediately
+        # Open session, initialize if needed, list tools, and close immediately
         session = await stack.enter_async_context(create_session(connection))
+        if hasattr(session, "initialize"):
+            await session.initialize()
         resp = await session.list_tools()
         raw_tools: Any = getattr(resp, "tools", resp)
 
@@ -107,6 +109,8 @@ async def _probe_one_server(
 
         logger.info("MCP preload: %s — %d tools discovered", name, len(tool_infos))
 
+        await stack.aclose()
+
         return MCPServerInfo(
             name=name,
             transport=transport_type,
@@ -114,23 +118,29 @@ async def _probe_one_server(
             status="ok",
         )
 
-    except Exception as e:
-        logger.warning("MCP preload: %s failed — %s", name, e)
-        return MCPServerInfo(
-            name=name,
-            transport=transport,
-            status="error",
-            error=str(e),
-        )
-    finally:
-        # Best-effort cleanup — suppress all errors including CancelledError
+    except BaseException as exc:
+        # A background task failure in anyio TaskGroup (e.g. HTTP 401 Unauthorized) enters
+        # cancel scope, causing asyncio.CancelledError on the main task.
+        # Calling stack.aclose() in *this* task will exit the cancel scope in the same task
+        # that entered it. stack.aclose() finalization raises the actual underlying exception
+        # (e.g. ExceptionGroup containing HTTP 401).
+        real_exc: BaseException = exc
         try:
-            await asyncio.wait_for(stack.aclose(), timeout=5.0)
-        except Exception:
-            logger.debug("MCP preload: %s cleanup error (suppressed)", name, exc_info=True)
-        except BaseException:
-            # Catch CancelledError (BaseException in 3.12+)
-            logger.debug("MCP preload: %s cleanup cancelled (suppressed)", name)
+            await stack.aclose()
+        except Exception as cleanup_exc:
+            real_exc = cleanup_exc
+        except BaseException as cleanup_base_exc:
+            real_exc = cleanup_base_exc
+
+        if isinstance(real_exc, Exception):
+            logger.warning("MCP preload: %s failed — %s", name, real_exc)
+            return MCPServerInfo(
+                name=name,
+                transport=transport,
+                status="error",
+                error=str(real_exc),
+            )
+        raise real_exc
 
 
 async def preload_mcp_server_info(

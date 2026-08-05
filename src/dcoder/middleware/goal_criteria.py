@@ -353,8 +353,8 @@ class _ContextToolCallBudgetMiddleware(AgentMiddleware[Any, Any]):
                 "Verification context limit reached. Decide using the evidence "
                 "already gathered."
             ),
-            name=request.tool_call["name"],
-            tool_call_id=request.tool_call["id"],
+            name=request.tool_call.get("name", "unknown") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "unknown",
+            tool_call_id=request.tool_call.get("id", "") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "",
             status="error",
         )
 
@@ -365,8 +365,11 @@ class _ContextToolCallBudgetMiddleware(AgentMiddleware[Any, Any]):
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
         """Apply the synchronous selected-tool call budget."""
+        if not getattr(request, "tool_call", None) or not isinstance(request.tool_call, dict):
+            return handler(request)
+
         if (
-            request.tool_call["name"] not in self._tool_names
+            request.tool_call.get("name") not in self._tool_names
             or self._reserve(request)
         ):
             return handler(request)
@@ -381,8 +384,11 @@ class _ContextToolCallBudgetMiddleware(AgentMiddleware[Any, Any]):
         ],
     ) -> ToolMessage | Command[Any]:
         """Apply the asynchronous selected-tool call budget."""
+        if not getattr(request, "tool_call", None) or not isinstance(request.tool_call, dict):
+            return await handler(request)
+
         if (
-            request.tool_call["name"] not in self._tool_names
+            request.tool_call.get("name") not in self._tool_names
             or self._reserve(request)
         ):
             return await handler(request)
@@ -430,22 +436,26 @@ class _RepositoryToolBudgetMiddleware(AgentMiddleware[Any, None]):
         """Return a bounded repository-tool error."""
         return ToolMessage(
             content=message,
-            name=request.tool_call["name"],
-            tool_call_id=request.tool_call["id"],
+            name=request.tool_call.get("name", "unknown") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "unknown",
+            tool_call_id=request.tool_call.get("id", "") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "",
             status="error",
         )
 
     def _preflight(self, request: ToolCallRequest) -> ToolMessage | None:
         """Reject malformed paths and backend entries that exceed hard limits."""
-        name = request.tool_call["name"]
-        args = request.tool_call.get("args") or {}
+        name = request.tool_call.get("name") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else None
+        if name is None:
+            return None
+        args = request.tool_call.get("args", {}) if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else {}
         error = self._bounds.preflight(name, args)
         return self._error(request, error) if error is not None else None
 
     async def _apreflight(self, request: ToolCallRequest) -> ToolMessage | None:
         """Asynchronously enforce repository path and metadata limits."""
-        name = request.tool_call["name"]
-        args = request.tool_call.get("args") or {}
+        name = request.tool_call.get("name") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else None
+        if name is None:
+            return None
+        args = request.tool_call.get("args", {}) if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else {}
         error = await self._bounds.apreflight(name, args)
         return self._error(request, error) if error is not None else None
 
@@ -464,15 +474,18 @@ class _RepositoryToolBudgetMiddleware(AgentMiddleware[Any, None]):
         ):
             return self._error(request, non_text)
         bounded = self._bounds.bound_text(
-            request.tool_call["name"], result.content
+            (request.tool_call.get("name") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "unknown") or "unknown", result.content
         )
         return result.model_copy(update={"content": bounded})
 
     def _bounded_request(self, request: ToolCallRequest) -> ToolCallRequest:
         """Clamp repository-tool arguments that directly control result size."""
-        name = request.tool_call["name"]
-        args = self._bounds.clamp_args(name, request.tool_call.get("args") or {})
-        return request.override(tool_call={**request.tool_call, "args": args})
+        name = request.tool_call.get("name") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else None
+        if name is None:
+            return request
+        args = request.tool_call.get("args", {}) if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else {}
+        new_tool_call = {**(request.tool_call if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else {}), "args": args}
+        return request.override(tool_call=cast(ToolCall, new_tool_call))
 
     @override
     def wrap_tool_call(
@@ -481,7 +494,10 @@ class _RepositoryToolBudgetMiddleware(AgentMiddleware[Any, None]):
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
         """Apply hard call and output limits around repository tools."""
-        if request.tool_call["name"] not in _REPOSITORY_TOOL_NAMES:
+        if not getattr(request, "tool_call", None) or not isinstance(request.tool_call, dict):
+            return handler(request)
+
+        if request.tool_call.get("name") not in _REPOSITORY_TOOL_NAMES:
             return handler(request)
 
         if not self._reserve_call(request):
@@ -506,7 +522,10 @@ class _RepositoryToolBudgetMiddleware(AgentMiddleware[Any, None]):
         ],
     ) -> ToolMessage | Command[Any]:
         """Asynchronously apply repository call, read, and output limits."""
-        if request.tool_call["name"] not in _REPOSITORY_TOOL_NAMES:
+        if not getattr(request, "tool_call", None) or not isinstance(request.tool_call, dict):
+            return await handler(request)
+
+        if request.tool_call.get("name") not in _REPOSITORY_TOOL_NAMES:
             return await handler(request)
 
         if not self._reserve_call(request):
@@ -559,8 +578,8 @@ class _WebSearchBudgetMiddleware(
                 "Web search limit reached. Continue using the available evidence "
                 "and context already gathered."
             ),
-            name=request.tool_call["name"],
-            tool_call_id=request.tool_call["id"],
+            name=request.tool_call.get("name", "unknown") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "unknown",
+            tool_call_id=request.tool_call.get("id", "") if getattr(request, "tool_call", None) and isinstance(request.tool_call, dict) else "",
             status="error",
         )
 
@@ -571,7 +590,10 @@ class _WebSearchBudgetMiddleware(
         handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
     ) -> ToolMessage | Command[Any]:
         """Apply the synchronous web-search budget."""
-        if request.tool_call["name"] != "web_search" or self._reserve(request):
+        if not getattr(request, "tool_call", None) or not isinstance(request.tool_call, dict):
+            return handler(request)
+
+        if request.tool_call.get("name") != "web_search" or self._reserve(request):
             return handler(request)
         return self._error(request)
 
@@ -584,7 +606,10 @@ class _WebSearchBudgetMiddleware(
         ],
     ) -> ToolMessage | Command[Any]:
         """Apply the asynchronous web-search budget."""
-        if request.tool_call["name"] != "web_search" or self._reserve(request):
+        if not getattr(request, "tool_call", None) or not isinstance(request.tool_call, dict):
+            return await handler(request)
+
+        if request.tool_call.get("name") != "web_search" or self._reserve(request):
             return await handler(request)
         return self._error(request)
 

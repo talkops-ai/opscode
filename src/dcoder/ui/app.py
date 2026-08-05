@@ -27,7 +27,7 @@ import logging
 import sys
 import time
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, cast
@@ -168,6 +168,7 @@ class DCoderApp(App):
         Binding("ctrl+d", "quit_app", "Quit", show=False),
         Binding("ctrl+l", "clear_chat", "Clear", show=False),
         Binding("shift+tab", "toggle_auto_approve", "Auto-approve", show=False),
+        Binding("ctrl+\\", "toggle_debug_console", "Debug", show=False),
     ]
 
     # ── App-level Lifecycle Messages ─────────────────────
@@ -241,6 +242,9 @@ class DCoderApp(App):
         self._startup_sequence_running = False
         self._server_startup_error: Exception | None = None
         self._exit = False
+        
+        self._debug_console_cleared_upto = -1
+        self._debug_console_click_to_copy = False
 
         # ── Goal State Synchronization ────────────────────
         self._goal_state_lock = asyncio.Lock()
@@ -316,8 +320,10 @@ class DCoderApp(App):
     # ── Layout ───────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
+        from dcoder.ui.goal_status import GoalStatusPanel
         yield MessageList(id="messages")
         with Container(id="bottom-container"):
+            yield GoalStatusPanel(id="goal-status-panel")
             yield ChatInput(id="input-area")
         yield StatusBar(id="status-bar")
 
@@ -923,6 +929,12 @@ class DCoderApp(App):
             except Exception:
                 logger.exception("Error during agent cleanup goal sync")
 
+            # Regroup completed tools at turn boundary (reference L15852)
+            try:
+                await self._regroup_completed_tools()
+            except Exception:
+                logger.exception("Error during agent turn regrouping")
+
             # Process next message from queue
             if not self._startup_sequence_running:
                 await self._process_next_from_queue()
@@ -1062,7 +1074,14 @@ class DCoderApp(App):
             try:
                 state = await client.aget_state(config)
                 if state and state.values:
-                    return dict(state.values)
+                    res = dict(state.values)
+                    # Merge goal channels from local DB if missing or empty in remote state
+                    if not res.get("_goal_objective"):
+                        local_state = await self._reconstruct_state_from_local_db(tid)
+                        for k, v in local_state.items():
+                            if (k not in res or res[k] is None) and v is not None:
+                                res[k] = v
+                    return res
             except Exception:
                 logger.debug(
                     "Remote aget_state failed for %s; trying local checkpointer",
@@ -1752,14 +1771,114 @@ class DCoderApp(App):
             pass
         return None
 
+    def _goal_rubric_payload_from_state(
+        self,
+        state_values: dict[str, Any],
+        raw_messages: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        """Extract goal and rubric metadata from raw checkpoint channel values.
+
+        Reference: deepagents_code/app.py L11433-L11560.
+        """
+        def _as_str(value: object) -> str | None:
+            return value if isinstance(value, str) else None
+
+        def _as_nonblank_str(value: object) -> str | None:
+            return value if isinstance(value, str) and value.strip() else None
+
+        goal_obj = _as_str(state_values.get("_goal_objective"))
+        goal_status = _as_str(state_values.get("_goal_status"))
+
+        # Fallback: extract objective and status from get_goal tool outputs if missing in state_values
+        if not goal_obj and raw_messages:
+            for m in raw_messages:
+                name = getattr(m, "name", None)
+                mtype = getattr(m, "type", None)
+                if name == "get_goal" or mtype == "tool":
+                    c = getattr(m, "content", "")
+                    if isinstance(c, str) and '"objective"' in c:
+                        try:
+                            import json
+                            parsed = json.loads(c)
+                            if isinstance(parsed, dict):
+                                obj = parsed.get("objective")
+                                stat = parsed.get("status")
+                                if isinstance(obj, str) and obj.strip():
+                                    goal_obj = obj.strip()
+                                if isinstance(stat, str) and stat.strip():
+                                    goal_status = stat.strip()
+                                break
+                        except Exception:
+                            pass
+
+        return {
+            "rubric": _as_str(state_values.get("rubric")),
+            "sticky_rubric": _as_str(state_values.get("_sticky_rubric")),
+            "sticky_rubric_recorded": "_sticky_rubric" in state_values,
+            "goal_objective": goal_obj or _as_str(state_values.get("_pending_goal_objective")),
+            "goal_status": goal_status or ("active" if goal_obj else None),
+            "goal_rubric": _as_str(state_values.get("_goal_rubric")),
+            "goal_status_note": _as_str(state_values.get("_goal_status_note")),
+            "pending_goal_completion_note": _as_str(state_values.get("_pending_goal_completion_note")),
+            "rubric_status": _as_str(state_values.get("_rubric_status")),
+            "rubric_grading_run_id": _as_nonblank_str(state_values.get("_current_grading_run_id")),
+            "pending_goal_objective": _as_str(state_values.get("_pending_goal_objective")),
+            "pending_goal_rubric": _as_str(state_values.get("_pending_goal_rubric")),
+            "pending_goal_kind": _as_str(state_values.get("_pending_goal_kind")),
+            "pending_goal_request_id": _as_nonblank_str(state_values.get("_pending_goal_request_id")),
+        }
+
+    def _sync_status_rubric(self) -> None:
+        """Sync active goal and rubric fields to local GoalState and GoalStatusPanel.
+
+        Reference: deepagents_code/app.py L11578.
+        """
+        from dcoder.commands.power.goal import get_goal_state
+        goal_state = get_goal_state(self)
+        goal_state.objective = self._active_goal
+        goal_state.status = self._goal_status or ("active" if self._active_goal else None)
+        goal_state.rubric = self._active_rubric
+        goal_state.status_note = self._goal_status_note
+        goal_state.pending_objective = self._pending_goal_objective
+        goal_state.pending_rubric = self._pending_goal_rubric
+        goal_state.pending_kind = self._pending_goal_kind
+
+        try:
+            from dcoder.ui.goal_status import GoalStatusPanel
+            panel = self.query_one(GoalStatusPanel)
+            panel.set_goal(
+                self._active_goal or self._pending_goal_objective,
+                self._goal_status or ("active" if self._active_goal else None),
+                self._goal_status_note or self._pending_goal_completion_note,
+            )
+        except Exception:
+            pass
+
+    def _restore_goal_rubric_state(self, payload: dict[str, Any]) -> None:
+        """Restore active goal and rubric state from thread payload.
+
+        Reference: deepagents_code/app.py L11540-L11580.
+        """
+        self._active_goal = payload.get("goal_objective")
+        self._goal_status = payload.get("goal_status")
+        self._goal_status_note = payload.get("goal_status_note")
+        self._pending_goal_completion_note = payload.get("pending_goal_completion_note")
+        if payload.get("goal_rubric"):
+            self._active_rubric = payload.get("goal_rubric")
+        elif payload.get("sticky_rubric_recorded"):
+            self._active_rubric = payload.get("sticky_rubric")
+        else:
+            self._active_rubric = payload.get("rubric")
+        self._pending_goal_objective = payload.get("pending_goal_objective")
+        self._pending_goal_rubric = payload.get("pending_goal_rubric")
+        self._pending_goal_kind = payload.get("pending_goal_kind")
+        self._pending_goal_request_id = payload.get("pending_goal_request_id")
+        self._sync_status_rubric()
+
     async def _load_thread_history(self, thread_id: str) -> None:
         """Fetch and mount stored message history for a thread.
 
-        Follows the reference ``_convert_messages_to_data`` +
-        ``_load_thread_history`` pattern: filter internal messages first via
-        ``is_internal_message``, then convert each message type into a widget.
-
-        Reference: deepagents_code/app.py L16193-L16305, L16585-L16787.
+        Follows reference deepagents_code/app.py L16193-L16305, L16585-L16787.
         """
         import re
         from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -1773,54 +1892,50 @@ class DCoderApp(App):
 
         state_values = await self._get_thread_state_values(thread_id)
         raw_messages = state_values.get("messages", [])
-
+        payload = self._goal_rubric_payload_from_state(state_values, raw_messages)
+        self._restore_goal_rubric_state(payload)
         if not raw_messages:
             return
 
-        # RemoteGraph.aget_state returns values as raw JSON dicts; convert to
-        # LangChain message objects so is_internal_message / isinstance work.
         if any(isinstance(m, dict) for m in raw_messages):
             from langchain_core.messages.utils import convert_to_messages
             raw_messages = convert_to_messages(raw_messages)
 
-        # ── Convert & match tool calls (reference pattern) ─
-        #
-        # AIMessage may carry .tool_calls *and* text content.
-        # ToolMessage results are matched back via tool_call_id so the
-        # widget shows the result alongside the right tool name + args.
-        pending_tools: dict[str, dict] = {}  # tool_call_id → {name, args, widget}
+        pending_tools: dict[str, dict] = {}
 
         try:
             messages_container = self.query_one("#messages", MessageList)
         except NoMatches:
             return
 
-        for msg in raw_messages:
-            # ── Gate 1: skip internal messages (reference L16213) ─────
-            # Catches goal_control, goal_state, rubric_grader, summarization
-            # messages via lc_source metadata AND [SYSTEM]-prefixed text.
-            if is_internal_message(msg):
-                continue
+        restored_goal_prompt = False
 
-            # ── Gate 2: skip named sub-graph messages ──────────────
-            # Sub-graph agents (rubric grader, criteria generator) set
-            # `name` on their messages.  Defense-in-depth: these should be
-            # excluded by the `checkpoint_ns = ''` filter in the local
-            # DB reconstruction, but we guard here in case of edge cases.
+        for idx, msg in enumerate(raw_messages):
+            msg_type = getattr(msg, "type", type(msg).__name__.lower().replace("message", ""))
+            content_raw = getattr(msg, "content", None)
+            is_internal = is_internal_message(msg)
             msg_name = getattr(msg, "name", None) or ""
+
+            logger.info(
+                "TUI: _load_thread_history msg[%d/%d] type=%s cls=%s name=%s is_internal=%s content=%r",
+                idx,
+                len(raw_messages),
+                msg_type,
+                type(msg).__name__,
+                msg_name,
+                is_internal,
+                str(content_raw)[:80] if content_raw else "",
+            )
+
+            # Gate 1: skip named sub-graph messages
             if msg_name in {"rubric_grader", "goal_criteria"}:
                 continue
 
-            # ── Gate 3: skip LangChain system messages ────────────────
-            msg_type = getattr(msg, "type", type(msg).__name__.lower().replace("message", ""))
+            # Gate 2: skip LangChain system messages
             if msg_type == "system":
                 continue
 
-            content_raw = getattr(msg, "content", None)
-            if content_raw is None:
-                continue
-
-            # Normalise list-of-blocks content → plain string
+            # Normalise content → plain string
             if isinstance(content_raw, list):
                 parts = []
                 for block in content_raw:
@@ -1829,16 +1944,32 @@ class DCoderApp(App):
                     elif isinstance(block, str):
                         parts.append(block)
                 text = "".join(parts).strip()
-            else:
+            elif content_raw is not None:
                 text = str(content_raw).strip()
+            else:
+                text = ""
 
             if isinstance(msg, HumanMessage) or msg_type == "human":
+                if text.startswith("[SYSTEM]") or is_internal:
+                    if not restored_goal_prompt and idx <= 3:
+                        goal_obj = payload.get("goal_objective") or state_values.get("_goal_objective")
+                        if goal_obj and isinstance(goal_obj, str) and goal_obj.strip():
+                            text = f"/goal {goal_obj.strip()}"
+                            restored_goal_prompt = True
+                            logger.info("TUI: Restored goal objective prompt for msg[%d]: %r", idx, text)
+                        else:
+                            logger.info("TUI: Skipping internal human msg[%d] (no goal objective found)", idx)
+                            continue
+                    else:
+                        logger.info("TUI: Skipping internal human msg[%d]", idx)
+                        continue
+                elif is_internal:
+                    continue
+
                 if not text:
                     continue
 
-                # Skip grader evaluation prompts leaked from sub-graph
-                # writes.  The SDK's _build_grader_payload produces these
-                # with a distinctive prefix.
+                # Skip grader evaluation prompts leaked from sub-graph writes
                 if text.startswith("This is grader iteration "):
                     continue
 
@@ -1847,9 +1978,6 @@ class DCoderApp(App):
                     continue
 
                 # ── Extract user intent from goal <operation> XML ─────
-                # These are criteria sub-graph prompts that leak into the
-                # main messages channel.  Extract the user-facing intent
-                # (/goal …) when possible; skip entirely otherwise.
                 if text.startswith("<operation>"):
                     if text.startswith("<operation>draft</operation>"):
                         match = re.search(r"<goal>\s*(.*?)\s*</goal>", text, re.DOTALL)
@@ -1901,7 +2029,7 @@ class DCoderApp(App):
                     if not isinstance(args, dict):
                         args = {}
                     messages_container.add_tool_call(
-                        name=name, call_id=tc_id, args=args,
+                        name=name, call_id=tc_id, args=args, live=False
                     )
                     if tc_id:
                         pending_tools[tc_id] = {"name": name}
@@ -1918,6 +2046,7 @@ class DCoderApp(App):
                         call_id=tc_id,
                         result=tool_content,
                         success=success,
+                        live=False,
                     )
                 else:
                     tool_name = getattr(msg, "name", None) or "tool"
@@ -1926,6 +2055,7 @@ class DCoderApp(App):
                         result=tool_content,
                         success=success,
                         name=tool_name,
+                        live=False,
                     )
             else:
                 logger.debug(
@@ -1938,6 +2068,16 @@ class DCoderApp(App):
             if tc_id in messages_container._tool_calls:
                 messages_container._tool_calls[tc_id].set_rejected()
 
+        # Regroup completed tool runs into collapsible summaries (reference L16991, L17149-L17270)
+        await self._regroup_completed_tools()
+
+        logger.info(
+            "TUI: _load_thread_history completed for thread %s (raw_messages=%d, mounted_widgets=%d)",
+            thread_id,
+            len(raw_messages),
+            len(messages_container.children),
+        )
+
         # Scroll to bottom after history loads (reference L16769-L16774)
         try:
             from textual.containers import VerticalScroll
@@ -1945,6 +2085,92 @@ class DCoderApp(App):
             chat.scroll_end(animate=False)
         except NoMatches:
             pass
+
+    def _close_active_tool_group(self) -> None:
+        """Finalize the open tool group into its collapsed past-tense form.
+
+        Reference: deepagents_code/app.py L17136-L17147.
+        """
+        try:
+            from dcoder.ui.messages import MessageList
+            messages = self.query_one("#messages", MessageList)
+            group = messages._active_tool_group
+            messages._active_tool_group = None
+            if group is not None and getattr(group, "is_attached", False):
+                fn = getattr(group, "close", None)
+                if callable(fn):
+                    fn()
+        except Exception:
+            logger.exception("Failed to close active tool group")
+
+    async def _regroup_completed_tools(self) -> None:
+        """Fold runs of completed tool calls into collapsible group summaries.
+
+        Scans the messages container for maximal runs of consecutive,
+        successfully-completed tool calls and inserts a ToolGroupSummary that
+        collapses each run into a single dim line.
+
+        Reference: deepagents_code/app.py L17149-L17270.
+        """
+        from textual.widget import Widget
+        from dcoder.ui.messages import (
+            _TOOL_GROUP_EXCLUSIONS,
+            MessageList,
+            ToolCallMessage,
+            ToolGroupSummary,
+        )
+
+        try:
+            messages = self.query_one("#messages", MessageList)
+        except NoMatches:
+            return
+
+        self._close_active_tool_group()
+
+        run_tools: list[ToolCallMessage] = []
+        run_collapsible: list[Widget] = []
+        run_anchor: Widget | None = None
+        folded_runs_count = 0
+
+        async def flush() -> None:
+            nonlocal run_tools, run_collapsible, run_anchor, folded_runs_count
+            if run_tools and run_anchor is not None and run_anchor.is_attached:
+                summary = ToolGroupSummary(
+                    tools=list(run_tools),
+                    collapsible=list(run_collapsible),
+                    live=False,
+                )
+                for widget in run_collapsible:
+                    widget.add_class("-grouped")
+                try:
+                    await messages.mount(summary, before=run_anchor)
+                    folded_runs_count += 1
+                except Exception:
+                    logger.warning("Failed to mount tool group summary", exc_info=True)
+            run_tools = []
+            run_collapsible = []
+            run_anchor = None
+
+        with self.batch_update():
+            for child in list(messages.children):
+                if isinstance(child, ToolCallMessage):
+                    groupable = (
+                        child.tool_name not in _TOOL_GROUP_EXCLUSIONS
+                        and child.is_success
+                        and not child.has_class("-grouped")
+                    )
+                    if not groupable:
+                        await flush()
+                        continue
+                    if run_anchor is None:
+                        run_anchor = child
+                    run_tools.append(child)
+                    run_collapsible.append(child)
+                    continue
+                await flush()
+            await flush()
+
+        logger.info("TUI: _regroup_completed_tools folded %d tool group runs", folded_runs_count)
 
 
     async def resume_thread(self, thread_id: str, *, is_new: bool = False) -> None:
@@ -1962,14 +2188,17 @@ class DCoderApp(App):
         except NoMatches:
             pass
 
+        if is_new:
+            self._restore_goal_rubric_state({})
+        else:
+            await self._load_thread_history(thread_id)
+            if hasattr(self, "_sync_goal_state_from_checkpoint"):
+                await self._sync_goal_state_from_checkpoint(force=True)
+
         label = "✨ Created new thread" if is_new else "🔄 Resumed thread"
         await self._mount_message(
             SystemMessage(f"{label}: `{thread_id}`")
         )
-        if not is_new:
-            await self._load_thread_history(thread_id)
-            if hasattr(self, "_sync_goal_state_from_checkpoint"):
-                await self._sync_goal_state_from_checkpoint(force=True)
 
 
     async def invoke_compact_conversation(self, thread_id: str | None = None, force: bool = True) -> None:
@@ -2159,8 +2388,9 @@ class DCoderApp(App):
             modal = ApprovalModalScreen(event.tool_name, event.call_id, event.args)
 
             def _on_modal_dismiss(decision: ApprovalDecided | None) -> None:
-                if decision and self._adapter:
-                    self._adapter.submit_approval(event.call_id, decision.approved)
+                if self._adapter:
+                    approved = decision.approved if decision else False
+                    self._adapter.submit_approval(event.call_id, approved)
 
             self.push_screen(modal, callback=_on_modal_dismiss)
         else:
@@ -2247,6 +2477,7 @@ class DCoderApp(App):
         """Clear chat and start fresh (Ctrl+L)."""
         self._pending_messages.clear()
         self._queued_widgets.clear()
+        self._restore_goal_rubric_state({})
         try:
             messages = self.query_one("#messages", MessageList)
             messages.clear()
@@ -2260,6 +2491,85 @@ class DCoderApp(App):
         self.notify("Auto-mode is currently disabled.", severity="warning", timeout=3)
         if self._adapter:
             self._adapter._auto_approve = False
+        
+    def action_toggle_debug_console(self) -> None:
+        """Toggle the Debug Console overlay via keybind or the `/debug` command."""
+        from dcoder.ui.debug_console import DebugConsoleScreen
+
+        if isinstance(self.screen, DebugConsoleScreen):
+            self.pop_screen()
+            if self._chat_input:
+                self._chat_input.focus_input()
+            return
+        self._open_debug_console()
+
+    def _open_debug_console(self) -> None:
+        """Push the read-only Debug Console modal."""
+        from dcoder.ui.debug_console import DebugConsoleScreen
+
+        def handle_result(_: None) -> None:
+            if self._chat_input:
+                self._chat_input.focus_input()
+
+        def persist_clear(cursor: int) -> None:
+            self._debug_console_cleared_upto = cursor
+
+        self.push_screen(
+            DebugConsoleScreen(
+                self._build_debug_snapshot(),
+                snapshot_provider=self._build_debug_snapshot,
+                cleared_upto=self._debug_console_cleared_upto,
+                on_clear=persist_clear,
+                click_to_copy=self._debug_console_click_to_copy,
+                on_click_to_copy_change=self._persist_debug_console_click_to_copy,
+            ),
+            handle_result,
+        )
+
+    def _persist_debug_console_click_to_copy(self, enabled: bool) -> None:
+        self._debug_console_click_to_copy = enabled
+
+    def _build_debug_snapshot(self) -> list[Any]:
+        """Capture a session/runtime snapshot for the debug console header."""
+        from dcoder._debug import installed_debug_log_path
+        from dcoder.config.env_vars import DEBUG, is_env_truthy
+        from dcoder._version import __version__
+        from dcoder.ui.debug_console import SnapshotField
+        import logging
+        from pathlib import Path
+
+        def _safe(
+            label: str, fn: Callable[[], str], *, copyable: bool = False
+        ) -> SnapshotField:
+            try:
+                return SnapshotField(label=label, value=fn(), copyable=copyable)
+            except Exception as exc:
+                logging.warning("Debug snapshot field %r failed", label, exc_info=True)
+                return SnapshotField(
+                    label=label, value=f"(unavailable: {type(exc).__name__})"
+                )
+
+        def _mcp() -> str:
+            servers = self._mcp_server_info or []
+            if not servers:
+                return "none"
+            return ", ".join(f"{s.name} ({s.status})" for s in servers)
+
+        def _log_path() -> str:
+            path = installed_debug_log_path()
+            if path:
+                return str(path)
+            if is_env_truthy(DEBUG):
+                return "in-memory only (file logging requested but unavailable)"
+            return "in-memory only"
+
+        return [
+            _safe("Version", lambda: __version__, copyable=True),
+            _safe("Thread", lambda: getattr(self, "_agent_thread_id", "(none)") or "(none)", copyable=True),
+            _safe("CWD", lambda: str(Path.cwd()), copyable=True),
+            _safe("MCP servers", _mcp),
+            _safe("Debug log", _log_path),
+        ]
 
     # ── Theme Selector Integration ────────────────────────
 

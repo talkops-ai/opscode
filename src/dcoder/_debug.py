@@ -17,10 +17,55 @@ from dcoder.config.env_vars import (
     DEBUG,
     DEBUG_FILE,
     DEFAULT_DEBUG_FILE,
+    LOG_LEVEL,
     is_env_truthy,
 )
 
+logger = logging.getLogger(__name__)
+
 _DEBUG_HANDLER_ATTR = "_dcoder_debug_handler"
+LOG_LEVELS = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+"""Canonical level-name to `logging` level mapping.
+
+The single source of truth for level names and their numeric values, shared with
+the Debug Console's level filter so severity ordering is never re-derived from
+hardcoded integers.
+"""
+
+
+def resolve_log_level(*, debug_enabled: bool | None = None) -> int:
+    """Resolve the configured runtime logging level.
+
+    Args:
+        debug_enabled: Whether `DCODER_CODE_DEBUG` is truthy. When omitted,
+            the current environment is checked.
+
+    Returns:
+        A standard `logging` level integer. Defaults to `DEBUG` when debug file
+        logging is enabled and `INFO` otherwise.
+    """
+    if debug_enabled is None:
+        debug_enabled = is_env_truthy(DEBUG)
+    fallback = logging.DEBUG if debug_enabled else logging.INFO
+    raw = os.environ.get(LOG_LEVEL)
+    if raw is None or not raw.strip():
+        return fallback
+    level = LOG_LEVELS.get(raw.strip().upper())
+    if level is not None:
+        return level
+    valid = ", ".join(LOG_LEVELS)
+    message = f"ignoring invalid {LOG_LEVEL}={raw!r}; expected one of {valid}"
+    # stderr for headless / pre-TUI visibility; the logger so it also lands in
+    # the always-on in-memory buffer and surfaces in the Debug Console.
+    print(f"Warning: {message}", file=sys.stderr)  # noqa: T201
+    logger.warning("%s", message)
+    return fallback
 
 
 def configure_debug_logging(target: logging.Logger) -> None:
@@ -42,7 +87,11 @@ def configure_debug_logging(target: logging.Logger) -> None:
     Args:
         target: Logger to configure.
     """
-    if not is_env_truthy(DEBUG):
+    debug_enabled = is_env_truthy(DEBUG)
+    level = resolve_log_level(debug_enabled=debug_enabled)
+    target.setLevel(level)
+
+    if not debug_enabled:
         return
 
     debug_path = Path(os.environ.get(DEBUG_FILE, DEFAULT_DEBUG_FILE))
@@ -54,7 +103,7 @@ def configure_debug_logging(target: logging.Logger) -> None:
             continue
         if Path(existing.baseFilename) == debug_path:
             # Already configured for this path; reuse rather than duplicate.
-            target.setLevel(logging.DEBUG)
+            existing.setLevel(level)
             return
         # The debug path changed; drop the stale handler before re-attaching so
         # we don't leak its file descriptor or fan logs out to two files.
@@ -70,10 +119,9 @@ def configure_debug_logging(target: logging.Logger) -> None:
         )
         return
     setattr(handler, _DEBUG_HANDLER_ATTR, True)
-    handler.setLevel(logging.DEBUG)
+    handler.setLevel(level)
     handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
     target.addHandler(handler)
-    target.setLevel(logging.DEBUG)
 
 
 def installed_debug_log_path() -> Path | None:

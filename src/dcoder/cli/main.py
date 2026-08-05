@@ -319,7 +319,9 @@ def cli_main() -> None:
 
         # Configure verbose logging
         if args.verbose:
-            logging.basicConfig(level=logging.DEBUG)
+            os.environ["DCODER_CODE_DEBUG"] = "1"
+            from dcoder._debug import configure_debug_logging
+            configure_debug_logging(logging.getLogger("dcoder"))
 
         # Resolve agent identity
         assistant_id = args.agent or "dcoder"

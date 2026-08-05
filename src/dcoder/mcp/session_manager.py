@@ -111,9 +111,11 @@ class MCPSessionManager:
                 await session.initialize()
                 self._sessions[name] = _MCPSessionEntry(session=session, exit_stack=exit_stack)
                 return session
-            except Exception as e:
-                await exit_stack.aclose()
-                logger.error("Failed to connect to MCP server %s: %s", name, e)
+            except BaseException:
+                try:
+                    await exit_stack.aclose()
+                except Exception as cleanup_exc:
+                    logger.warning("Failed to close partially initialized MCP session for %s: %s", name, cleanup_exc)
                 raise
 
     async def get_session(self, name: str) -> ClientSession:

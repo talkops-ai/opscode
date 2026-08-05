@@ -57,6 +57,11 @@ DEBUG_FILE = "DCODER_CODE_DEBUG_FILE"
 DEFAULT_DEBUG_FILE = "/tmp/dcoder_debug.log"  # noqa: S108  # opt-in debug log
 """Default path for the debug log when `DEBUG_FILE` is unset."""
 
+LOG_LEVEL = "DCODER_CODE_LOG_LEVEL"
+"""Override the runtime logging level (e.g. DEBUG, INFO, WARNING).
+Takes precedence over the default logging level derived from `DEBUG`.
+"""
+
 DEBUG_MCP_PROJECT_TRUST = "DCODER_CODE_DEBUG_MCP_PROJECT_TRUST"
 """Force the project MCP approval prompt for manual UI testing.
 
