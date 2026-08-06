@@ -84,7 +84,6 @@ StatusBar {
     dock: bottom;
     height: 1;
     color: $foreground;
-    padding: 0 1;
 }
 
 /* ── Chat input ──────────────────────────────────────── */
@@ -240,3 +239,159 @@ SubagentPanel {
     color: $foreground;
     text-style: italic;
 }
+
+/* ── Inline Prompts & Approval Menus ─────────────────── */
+
+.inline-prompt {
+    height: auto;
+    margin: 1 0;
+    padding: 0 1;
+    background: $surface;
+    border: solid $success;
+}
+
+.inline-prompt .inline-prompt-title {
+    text-style: bold;
+    color: $success;
+    margin-bottom: 0;
+}
+
+.inline-prompt .inline-prompt-help {
+    color: $foreground;
+    text-style: italic;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.goal-review-menu .goal-review-content {
+    height: auto;
+    max-height: 12;
+    padding: 0 1;
+}
+
+.goal-review-menu .goal-review-body {
+    height: auto;
+}
+
+.goal-review-menu .goal-review-markdown {
+    margin: 0 0 1 0;
+    padding: 0;
+}
+
+.goal-review-menu .goal-review-options-container {
+    height: auto;
+    background: $surface;
+    padding: 0 1;
+    margin-top: 0;
+}
+
+.goal-review-menu .goal-review-option {
+    height: 1;
+    padding: 0 1;
+}
+
+.goal-review-menu .goal-review-option-selected {
+    background: $primary;
+    text-style: bold;
+}
+
+.goal-review-menu .goal-review-edit-input {
+    margin: 1 1 0 1;
+    height: auto;
+    min-height: 4;
+    max-height: 12;
+    background: transparent;
+}
+
+.approval-menu {
+    height: auto;
+    margin: 1 0;
+    padding: 0 1;
+    background: $surface;
+    border: solid $warning;
+}
+
+.approval-menu .approval-title {
+    text-style: bold;
+    color: $warning;
+    margin-bottom: 0;
+}
+
+.approval-menu .approval-command {
+    height: auto;
+    margin: 0 0 1 0;
+    padding: 0 1;
+    color: $warning;
+}
+
+.approval-menu .approval-separator {
+    height: 1;
+    color: $warning;
+    margin: 0;
+}
+
+.approval-menu .tool-info-scroll {
+    height: auto;
+    max-height: 10;
+    margin-top: 0;
+}
+
+.approval-menu .tool-info-container {
+    height: auto;
+}
+
+.approval-menu .approval-options-container {
+    height: auto;
+    background: $surface;
+    padding: 0 1;
+    margin-top: 0;
+}
+
+.approval-menu .approval-option {
+    height: 1;
+    padding: 0 1;
+}
+
+.approval-menu .approval-option-selected {
+    background: $primary;
+    text-style: bold;
+}
+
+.approval-menu .approval-reason-input {
+    margin: 1 0 0 0;
+    border: solid $warning;
+    background: $surface;
+}
+
+.approval-menu .approval-help {
+    color: $foreground;
+    text-style: italic;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Tool approval widgets & diff styling */
+.tool-approval-widget {
+    height: auto;
+}
+
+.diff-removed {
+    height: auto;
+    color: $text-error;
+    background: $error-muted;
+    padding: 0 1;
+}
+
+.diff-added {
+    height: auto;
+    color: $text-success;
+    background: $success-muted;
+    padding: 0 1;
+}
+
+.diff-context {
+    height: auto;
+    color: $text-muted;
+    padding: 0 1;
+}
+

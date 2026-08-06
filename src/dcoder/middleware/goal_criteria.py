@@ -20,6 +20,7 @@ import json
 import logging
 import threading
 from collections import OrderedDict
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, cast
 
 from langchain.agents.middleware.types import (
@@ -1114,6 +1115,24 @@ def create_goal_criteria_agent(
                 ),
             ]
         )
+
+    from dcoder.middleware.auto_mode import AsyncApprovalHITLMiddleware
+    from dcoder.agent.factory import _should_interrupt_tool_call, _format_description
+
+    criteria_interrupt_on: dict[str, Any] = {
+        t.name: {
+            "allowed_decisions": ["approve", "reject"],
+            "description": _format_description,
+            "when": _should_interrupt_tool_call,
+        }
+        for t in normalized_context_tools
+    }
+    middleware.append(AsyncApprovalHITLMiddleware(criteria_interrupt_on))
+
+    logger.debug(
+        "[HITL_TRACE_DEBUG] GoalCriteriaAgent created | criteria_middleware=%s",
+        [getattr(m, "name", type(m).__name__) for m in middleware],
+    )
 
     return create_agent(
         model=model,

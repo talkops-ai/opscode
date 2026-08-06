@@ -45,18 +45,35 @@ def run_sync(coro):
 from langchain.agents.middleware.types import AgentMiddleware
 
 
-def _should_interrupt_tool_call(request: Any) -> bool:
+def _should_interrupt_tool_call(request: Any, *, auto_mode_enabled: bool = True) -> bool:
     """Decide whether a gated tool call should pause for human approval."""
+    from dcoder.middleware.auto_mode import _async_routing_mode
+    from dcoder.security.approval_mode import ApprovalMode, coerce_approval_mode, read_approval_mode_from_store, approval_mode_key
+
+    # 1. Check async routing mode attached by AsyncApprovalHITLMiddleware / AutoModeHITLMiddleware
+    mode = _async_routing_mode(getattr(request, "state", None))
     runtime = getattr(request, "runtime", None)
-    ctx = getattr(runtime, "context", None)
-    if ctx is not None:
-        auto_app = False
+
+    # 2. Fall back to context / store resolution if no async routing decision present
+    if mode is None and runtime is not None:
+        ctx = getattr(runtime, "context", None)
+        store = getattr(runtime, "store", None)
         if isinstance(ctx, dict):
-            auto_app = bool(ctx.get("auto_approve", False))
-        else:
-            auto_app = bool(getattr(ctx, "auto_approve", False))
-        if auto_app:
-            return False
+            if ctx.get("auto_approve"):
+                mode = ApprovalMode.YOLO
+            elif ctx.get("approval_mode"):
+                mode = coerce_approval_mode(ctx.get("approval_mode"))
+            elif ctx.get("thread_id"):
+                key = approval_mode_key(str(ctx["thread_id"]))
+                mode = read_approval_mode_from_store(store, key)
+        elif ctx is not None:
+            if getattr(ctx, "auto_approve", False):
+                mode = ApprovalMode.YOLO
+
+    if mode is ApprovalMode.YOLO:
+        return False
+    if mode is ApprovalMode.AUTO:
+        return not auto_mode_enabled
 
     # Never interrupt internal memory file writes (e.g. AGENTS.md)
     tool_call = getattr(request, "action", None) or getattr(request, "tool_call", None)
@@ -127,6 +144,9 @@ def _subagent_cli_middleware(
     if not has_explicit_model:
         middleware.append(ConfigurableModelMiddleware(persist_model_state=False))
 
+    from dcoder.middleware.cost_tracking import CostTrackingMiddleware
+    middleware.append(CostTrackingMiddleware(nested=True))
+
     if not interactive:
         from dcoder.middleware.glm_stall_recovery import GlmTerminalStallRecoveryMiddleware
         middleware.append(GlmTerminalStallRecoveryMiddleware())
@@ -136,14 +156,17 @@ def _subagent_cli_middleware(
         middleware.append(ShellAllowListMiddleware(shell_allow_list))
 
     if interrupt_on is not None:
-        from dcoder.middleware.auto_mode import AutoModeHITLMiddleware
-        middleware.append(
-            AutoModeHITLMiddleware(
-                interrupt_on,
-                worktree_root=worktree_root,
-                shell_allow_list=shell_allow_list,
-            )
+        from dcoder.middleware.auto_mode import AsyncApprovalHITLMiddleware
+        middleware.append(AsyncApprovalHITLMiddleware(interrupt_on))
+
+    from dcoder.middleware.server_hooks import ServerHooksMiddleware
+    subagent_cwd = Path(worktree_root) if worktree_root is not None else Path.cwd()
+    middleware.append(
+        ServerHooksMiddleware(
+            cwd=subagent_cwd,
+            emit_stop=False,
         )
+    )
 
     # Tool Filtering Proxy Middleware
     if allowed_tools:
@@ -434,7 +457,10 @@ def create_dcoder_agent(
             if gated_names := gated_mcp_tool_names(mcp_tools_list):
                 agent_middleware.append(HeadlessMCPGuardMiddleware(gated_names))
 
-    agent_middleware.extend([ResumeStateMiddleware(), GoalToolsMiddleware()])
+    from dcoder.middleware.cost_tracking import CostTrackingMiddleware
+    agent_middleware.extend(
+        [ResumeStateMiddleware(), CostTrackingMiddleware(), GoalToolsMiddleware()]
+    )
 
     # AskUser Middleware (if enabled)
     if enable_ask_user:
@@ -580,15 +606,28 @@ def create_dcoder_agent(
             },
         }
 
-    if not auto_approve and interactive:
+    auto_mode_config: tuple[Path, list[str]] | None = None
+    if interrupt_on is not None and interactive and not auto_approve:
+        auto_mode_config = (Path(effective_cwd), list(allow_list))
+
+    if auto_mode_config is not None and interrupt_on:
         from dcoder.middleware.auto_mode import AutoModeHITLMiddleware
         agent_middleware.append(
             AutoModeHITLMiddleware(
                 interrupt_on,
-                worktree_root=effective_cwd,
-                shell_allow_list=allow_list,
+                worktree_root=auto_mode_config[0],
+                shell_allow_list=auto_mode_config[1],
             )
         )
+    elif interrupt_on is not None:
+        from dcoder.middleware.auto_mode import AsyncApprovalHITLMiddleware
+        agent_middleware.append(AsyncApprovalHITLMiddleware(interrupt_on))
+
+    from dcoder.middleware.server_hooks import ServerHooksMiddleware
+    hooks_cwd = Path(effective_cwd) if effective_cwd else Path.cwd()
+    agent_middleware.append(
+        ServerHooksMiddleware(cwd=hooks_cwd, mcp_tools=mcp_tools_list)
+    )
 
     # Goal Criteria Generator Middleware — full nested pipeline
     from dcoder.middleware.goal_criteria import (
@@ -638,15 +677,27 @@ def create_dcoder_agent(
     agent_middleware.append(CLICompactionMiddleware(thread_id=thread_id))
 
     # Reliable Rubric Evaluator Middleware — with grader middleware and context schema
+    from dcoder.middleware.goal_criteria import _WebSearchBudgetMiddleware
     from dcoder.rubrics import _create_rubric_grader_tools
     from dcoder.rubrics.evaluator import _RUBRIC_GRADER_SYSTEM_PROMPT
 
     rubric_grader_tools = _create_rubric_grader_tools(composite_backend)
+
+    grader_middleware: list[AgentMiddleware[Any, Any]] = [
+        _WebSearchBudgetMiddleware(),
+    ]
+
+    logger.debug(
+        "[HITL_TRACE_DEBUG] ReliableRubric Grader Middleware Stack: %s",
+        [getattr(m, "name", type(m).__name__) for m in grader_middleware],
+    )
+
     agent_middleware.append(
         ReliableRubricMiddleware(
             model=active_model,
             system_prompt=_RUBRIC_GRADER_SYSTEM_PROMPT,
             tools=rubric_grader_tools,
+            grader_middleware=grader_middleware,
             grader_context_schema=CLIContextSchema,
         )
     )
@@ -722,19 +773,22 @@ def create_dcoder_agent(
     resolved_system_prompt = None
 
 
-    # 8. Configure HITL interrupts (moved earlier for middleware ordering)
-
-    # 9. Compile using deepagents SDK
     all_subagents: list[Any] = [
         *compiled_subagents,
         *(async_subagents or []),
     ]
+    logger.debug(
+        "[HITL_TRACE_DEBUG] Main Agent Middleware Stack: %s",
+        [getattr(m, "name", type(m).__name__) for m in agent_middleware],
+    )
+
     agent = create_deep_agent(
         model=active_model,
         system_prompt=cast(Any, resolved_system_prompt),
         tools=tools_list,
         backend=composite_backend,
         middleware=agent_middleware,
+        interrupt_on=interrupt_on,
         context_schema=CLIContextSchema,
         checkpointer=checkpointer,
         subagents=all_subagents or None,

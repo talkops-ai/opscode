@@ -187,7 +187,7 @@ class StatusBar(Horizontal):
     StatusBar {
         height: 1;
         dock: bottom;
-        background: $primary 5%;
+        background: $background;
     }
 
     StatusBar .status-mode {
@@ -428,6 +428,12 @@ class StatusBar(Horizontal):
         if self._hide_git_branch:
             with suppress(NoMatches):
                 self.query_one("#branch-display", BranchLabel).display = False
+        else:
+            from dcoder.utils.git import read_git_branch_from_filesystem
+            try:
+                self.branch = read_git_branch_from_filesystem(self.cwd) or ""
+            except Exception:
+                pass
         # Set initial model display
         label = self.query_one("#model-display", ModelLabel)
         label.provider = settings.model_provider or ""

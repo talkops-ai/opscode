@@ -1,11 +1,16 @@
-"""Goal review screen — dedicated modal for reviewing LLM-generated rubrics.
-
-Displays the objective and proposed acceptance criteria in a two-pane
-layout with Accept / Reject / Amend buttons.
-"""
+"""Goal review screen and widget exports."""
 
 from __future__ import annotations
 
+from dcoder.ui.widgets.goal_review import (
+    GoalReviewAccepted,
+    GoalReviewCancelled,
+    GoalReviewEdited,
+    GoalReviewMenu,
+    GoalReviewRejected,
+    GoalReviewResult,
+    GoalReviewTextArea,
+)
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -15,7 +20,7 @@ from textual.widgets import Button, Label, Static
 
 
 class GoalReviewScreen(ModalScreen[str]):
-    """Modal for reviewing a proposed goal and rubric.
+    """Legacy Modal for reviewing a proposed goal and rubric.
 
     Dismiss values:
       - ``"accept"``  — accept the proposed rubric
@@ -131,3 +136,15 @@ class GoalReviewScreen(ModalScreen[str]):
 
     def action_accept(self) -> None:
         self.dismiss("accept")
+
+
+__all__ = [
+    "GoalReviewAccepted",
+    "GoalReviewCancelled",
+    "GoalReviewEdited",
+    "GoalReviewMenu",
+    "GoalReviewRejected",
+    "GoalReviewResult",
+    "GoalReviewScreen",
+    "GoalReviewTextArea",
+]

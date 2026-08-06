@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar, cast
 
+from textual.binding import Binding, BindingType
 from textual.content import Content
 from textual.message import Message
 from textual.widgets import Static
@@ -107,6 +108,19 @@ class InlinePromptTextArea(CollapsingPasteTextArea):
             self.text_area = text_area
             self.value = value
 
+    BINDINGS: ClassVar[list[BindingType]] = [
+        cast(
+            BindingType,
+            Binding(
+                "shift+enter,alt+enter,ctrl+enter,ctrl+j",
+                "insert_newline",
+                "New Line",
+                show=False,
+                priority=True,
+            ),
+        ),
+    ]
+
     def __init__(self, **kwargs: Any) -> None:
         """Initialize an inline prompt text area."""
         classes = kwargs.pop("classes", None)
@@ -118,6 +132,11 @@ class InlinePromptTextArea(CollapsingPasteTextArea):
         super().__init__(classes=prompt_classes, **kwargs)
         self.show_line_numbers = False
         self.soft_wrap = True
+        self._backslash_pending_time: float | None = None
+
+    def action_insert_newline(self) -> None:
+        """Insert a newline at cursor position."""
+        self.insert("\n")
 
     @property
     def submitted_value(self) -> str:
@@ -125,9 +144,47 @@ class InlinePromptTextArea(CollapsingPasteTextArea):
         return self.text
 
     async def _on_key(self, event: events.Key) -> None:
+        now = time.monotonic()
+
+        # Handle backslash followed rapidly by enter (terminal-emitted shift+enter)
+        if event.key == "enter" and self._backslash_pending_time is not None:
+            if now - self._backslash_pending_time <= 0.15:
+                self._backslash_pending_time = None
+                cursor_row, cursor_col = self.cursor_location
+                if cursor_col > 0:
+                    start = (cursor_row, cursor_col - 1)
+                    if self.document.get_text_range(start, self.cursor_location) == "\\":
+                        self.delete(start, self.cursor_location)
+                        self.action_insert_newline()
+                        event.prevent_default()
+                        event.stop()
+                        return
+                elif cursor_row > 0:
+                    prev_line = self.document.get_line(cursor_row - 1)
+                    start = (cursor_row - 1, len(prev_line) - 1)
+                    if self.document.get_text_range(start, (cursor_row - 1, len(prev_line))) == "\\":
+                        self.delete(start, (cursor_row - 1, len(prev_line)))
+                        self.action_insert_newline()
+                        event.prevent_default()
+                        event.stop()
+                        return
+            self._backslash_pending_time = None
+
+        if event.key == "backslash" or event.character == "\\":
+            self._backslash_pending_time = now
+
         # Modifier+Enter (and Ctrl+J) insert a newline rather than submitting.
-        if event.key in ("shift+enter", "alt+enter", "ctrl+j"):
-            self.insert("\n")
+        modifiers = getattr(event, "modifiers", ())
+        is_modifier_enter = (
+            event.key in ("shift+enter", "alt+enter", "ctrl+enter", "meta+enter", "super+enter", "ctrl+j")
+            or (
+                event.key == "enter"
+                and isinstance(modifiers, (list, tuple, set, dict))
+                and any(m in modifiers for m in ("shift", "alt", "ctrl", "meta"))
+            )
+        )
+        if is_modifier_enter:
+            self.action_insert_newline()
             event.prevent_default()
             event.stop()
             return

@@ -789,7 +789,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         "audio_inputs": True,
         "pdf_inputs": False,
         "video_inputs": False,
-        "reasoning_output": True,
+        "reasoning_output": False,
         "tool_calling": True,
         "structured_output": True,
         "status": None,

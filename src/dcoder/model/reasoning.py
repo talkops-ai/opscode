@@ -52,10 +52,12 @@ def default_effort_for_model(
 ) -> str | None:
     """Return the profile's reasoning effort default independently of its levels."""
     profile = _model_profile(model_spec, cli_override=cli_override)
-    if profile is None or "reasoning_effort_default" not in profile:
+    if profile is None:
         return None
-    default = profile["reasoning_effort_default"]
-    return str(default) if default is not None else None
+    default = profile.get("reasoning_effort_default")
+    if default is not None:
+        return str(default)
+    return "medium"
 
 
 def is_effort_supported_for_model(

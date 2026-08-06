@@ -1,9 +1,14 @@
-"""Unit tests for ReliableRubricMiddleware — transport error detection and message filtering."""
+"""Unit tests for ReliableRubricMiddleware — transport error detection, message filtering, and grader instantiation."""
 
-import pytest
+from unittest.mock import MagicMock
+
 import httpx
+import pytest
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
 
 from dcoder.middleware.reliable_rubric import (
+    ReliableRubricMiddleware,
     _exception_chain,
     _is_transient_grader_transport_error,
 )
@@ -69,3 +74,28 @@ class TestIsTransientGraderTransportError:
     def test_connect_error_not_retryable(self):
         exc = httpx.ConnectError("Connection refused")
         assert _is_transient_grader_transport_error(exc) is False
+
+
+class TestReliableRubricMiddlewareInstantiation:
+    """Tests for ReliableRubricMiddleware creation and grader setup."""
+
+    def test_middleware_instantiation_and_ensure_grader(self):
+        model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
+        middleware = ReliableRubricMiddleware(
+            model=model,
+            grader_middleware=[],
+        )
+        assert middleware._grader_middleware == []
+        grader = middleware._ensure_grader()
+        assert grader is not None
+
+    def test_after_agent_returns_none_when_no_active_rubric(self):
+        from typing import Any, cast
+        model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
+        middleware = ReliableRubricMiddleware(
+            model=model,
+        )
+        runtime = MagicMock()
+        runtime.context = None
+        state = cast(Any, {"messages": []})
+        assert middleware.after_agent(state, runtime) is None

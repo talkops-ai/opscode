@@ -26,6 +26,7 @@ from dcoder.middleware.headless_mcp_guard import (
     mcp_tool_is_coherently_read_only,
 )
 from dcoder.middleware.shell_allow_list import ShellAllowListMiddleware
+from dcoder.middleware.cost_tracking import CostTrackingMiddleware, CostState
 from dcoder.middleware.auto_mode import AutoModeHITLMiddleware
 
 # Type-only imports so checkers see proper class types for lazy-loaded names.
@@ -61,6 +62,8 @@ __all__ = [
     "GoalToolsMiddleware",
     "AskUserMiddleware",
     "ResumeStateMiddleware",
+    "CostTrackingMiddleware",
+    "CostState",
     "ManagedMemoryGuardMiddleware",
     "CLICompactionMiddleware",
     "PluginSkillsMiddleware",

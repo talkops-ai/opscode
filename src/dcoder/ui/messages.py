@@ -2604,13 +2604,19 @@ class ToolCallMessage(Vertical):
 # "search" so a mixed run folds into a single "Searched for N patterns" segment.
 _TOOL_SUMMARY_CATEGORY: dict[str, str] = {
     "read_file": "read",
+    "view_file": "read",
     "write_file": "write",
+    "write_to_file": "write",
     "edit_file": "edit",
+    "replace_file_content": "edit",
+    "multi_replace_file_content": "edit",
     "delete": "delete",
     "ls": "ls",
+    "list_dir": "ls",
     "grep": "search",
     "glob": "search",
     "execute": "shell",
+    "run_command": "shell",
     "web_search": "web_search",
     "fetch_url": "fetch",
     "task": "task",
@@ -3597,10 +3603,11 @@ class ErrorMessage(Static):
     DEFAULT_CSS = """
     ErrorMessage {
         height: auto;
-        padding: 1 2;
-        margin: 1 0 0 0;
-        background: $surface;
-        color: $error;
+        padding: 0 1;
+        margin: 0 0 1 0;
+        background: $error-muted;
+        color: $text;
+        border-left: wide $error;
         pointer: text;
     }
     """
@@ -3608,8 +3615,8 @@ class ErrorMessage(Static):
     def __init__(self, content: str, **kwargs: Any) -> None:
         self._raw_content = content
         text = Text()
-        text.append("● Error: ", style="bold red")
-        text.append(content, style="red")
+        text.append("Error: ", style="bold red")
+        text.append(content, style="default")
         super().__init__(text, **kwargs)
 
 class SystemMessage(Static):
@@ -3719,6 +3726,12 @@ class MessageList(VerticalScroll):
         """Suspend auto-scroll when user manually scrolls up."""
         self._auto_scroll_locked = False
 
+    def mount_inline_prompt(self, widget: Widget) -> None:
+        """Mount an inline prompt widget into the message transcript area."""
+        self.mount(widget)
+        if self._auto_scroll_locked:
+            self._scroll_to_end()
+
     def add_thinking_message(self, content: str = "", duration_seconds: float = 0.0) -> ThinkingMessage:
         """Add a thinking message widget to the conversation."""
         msg = ThinkingMessage(content=content, duration_seconds=duration_seconds)
@@ -3737,10 +3750,92 @@ class MessageList(VerticalScroll):
         if self._auto_scroll_locked:
             self._scroll_to_end()
 
+    def close_active_tool_group(self) -> None:
+        """Finalize the open tool group into its collapsed past-tense form.
+
+        Matches reference deepagents_code/app.py L17136-L17147.
+        """
+        group = self._active_tool_group
+        self._active_tool_group = None
+        if group is not None and getattr(group, "is_attached", False):
+            try:
+                group.close()
+            except Exception:
+                logger.exception("Failed to close active tool group")
+
+    def reveal_pending_tool_calls(self) -> None:
+        """Surface grouped tool calls before asking for approval."""
+        group = self._active_tool_group
+        self.close_active_tool_group()
+        if group is None or not getattr(group, "is_attached", False):
+            return
+        try:
+            group.reveal_pending()
+        except Exception:
+            logger.exception("Failed to reveal pending tool calls")
+
+    async def regroup_completed_tools(self) -> None:
+        """Fold runs of completed tool calls into collapsible group summaries.
+
+        Scans the messages container for maximal runs of consecutive,
+        successfully-completed tool calls and inserts a ToolGroupSummary that
+        collapses each run into a single dim line.
+
+        Reference: deepagents_code/app.py L17149-L17270.
+        """
+        self.close_active_tool_group()
+
+        run_tools: list[ToolCallMessage] = []
+        run_collapsible: list[Widget] = []
+        run_anchor: Widget | None = None
+        folded_runs_count = 0
+
+        async def flush() -> None:
+            nonlocal run_tools, run_collapsible, run_anchor, folded_runs_count
+            if run_tools and run_anchor is not None and getattr(run_anchor, "is_attached", False):
+                summary = ToolGroupSummary(
+                    tools=list(run_tools),
+                    collapsible=list(run_collapsible),
+                    live=False,
+                )
+                for widget in run_collapsible:
+                    widget.add_class("-grouped")
+                try:
+                    await self.mount(summary, before=run_anchor)
+                    folded_runs_count += 1
+                except Exception:
+                    logger.warning("Failed to mount tool group summary", exc_info=True)
+            run_tools = []
+            run_collapsible = []
+            run_anchor = None
+
+        from contextlib import nullcontext
+        batch_ctx = self.app.batch_update() if (self.is_attached and self.app is not None) else nullcontext()
+        with batch_ctx:
+            for child in list(self.children):
+                if isinstance(child, ToolCallMessage):
+                    groupable = (
+                        child.tool_name not in _TOOL_GROUP_EXCLUSIONS
+                        and child.is_success
+                        and not child.has_class("-grouped")
+                    )
+                    if not groupable:
+                        await flush()
+                        continue
+                    if run_anchor is None:
+                        run_anchor = child
+                    run_tools.append(child)
+                    run_collapsible.append(child)
+                    continue
+                await flush()
+            await flush()
+
+        logger.debug("TUI: MessageList.regroup_completed_tools folded %d runs", folded_runs_count)
+
     def add_user_message(self, text: str) -> None:
         """Add a user message and reset auto-scroll."""
         self._auto_scroll_locked = True
-        self._active_tool_group = None
+        self.close_active_tool_group()
         self.mount(UserMessage(text))
         self._scroll_to_end()
 
@@ -3758,9 +3853,9 @@ class MessageList(VerticalScroll):
 
     def start_assistant_message(self) -> None:
         """Start a streaming assistant message."""
+        self.close_active_tool_group()
         msg = AssistantMessage()
         self._current_assistant = msg
-        self._active_tool_group = None
         self.mount(msg)
         self._scroll_to_end()
 
@@ -3790,6 +3885,7 @@ class MessageList(VerticalScroll):
             self._current_assistant.finish()
             self._current_assistant = None
             self._scroll_to_end()
+        self.close_active_tool_group()
 
     def add_tool_call(
         self, name: str, call_id: str, args: dict[str, Any], live: bool = True
@@ -3797,12 +3893,17 @@ class MessageList(VerticalScroll):
         """Add a tool-call widget."""
         msg = ToolCallMessage(name, args)
         self._tool_calls[call_id] = msg
-        if live and name not in _TOOL_GROUP_EXCLUSIONS:
-            if self._active_tool_group is None or not self._active_tool_group.is_attached:
-                self._active_tool_group = ToolGroupSummary(live=True)
-                self.mount(self._active_tool_group)
-            self._active_tool_group.add_member(msg)
-        self.mount(msg)
+        from contextlib import nullcontext
+        batch_ctx = self.app.batch_update() if (self.is_attached and self.app is not None) else nullcontext()
+        with batch_ctx:
+            if live and name not in _TOOL_GROUP_EXCLUSIONS:
+                if self._active_tool_group is None or not getattr(self._active_tool_group, "is_attached", False):
+                    self._active_tool_group = ToolGroupSummary(live=True)
+                    self.mount(self._active_tool_group)
+                msg.add_class("-grouped")
+                msg.display = False
+                self._active_tool_group.add_member(msg)
+            self.mount(msg)
         self._scroll_to_end()
 
     def update_tool_result(
@@ -3820,16 +3921,21 @@ class MessageList(VerticalScroll):
             msg = ToolCallMessage(msg_name, {})
             if call_id:
                 self._tool_calls[call_id] = msg
-            if live and msg_name not in _TOOL_GROUP_EXCLUSIONS:
-                if self._active_tool_group is None or not self._active_tool_group.is_attached:
-                    self._active_tool_group = ToolGroupSummary(live=True)
-                    self.mount(self._active_tool_group)
-                self._active_tool_group.add_member(msg)
-            self.mount(msg)
-            if success:
-                msg.set_success(result)
-            else:
-                msg.set_error(result)
+            from contextlib import nullcontext
+            batch_ctx = self.app.batch_update() if (self.is_attached and self.app is not None) else nullcontext()
+            with batch_ctx:
+                if live and msg_name not in _TOOL_GROUP_EXCLUSIONS:
+                    if self._active_tool_group is None or not getattr(self._active_tool_group, "is_attached", False):
+                        self._active_tool_group = ToolGroupSummary(live=True)
+                        self.mount(self._active_tool_group)
+                    msg.add_class("-grouped")
+                    msg.display = False
+                    self._active_tool_group.add_member(msg)
+                self.mount(msg)
+                if success:
+                    msg.set_success(result)
+                else:
+                    msg.set_error(result)
         self._scroll_to_end()
 
     def add_skill_message(self, name: str, content: str) -> None:
@@ -3939,3 +4045,116 @@ class QueuedUserMessage(Static):
             ("⏳ Queued: ", "italic bold $warning"),
             (self._raw_content, "italic dim"),
         )
+
+
+class _RubricResultToggle(Static):
+    """Clickable element inside a rubric result widget."""
+
+    can_focus = False
+
+
+class RubricResultMessage(Vertical):
+    """Compact grader result with complete, scrollable details on demand."""
+
+    class ExpansionChanged(Message):
+        """Posted when the grader-details expansion state changes."""
+
+        def __init__(self, widget: RubricResultMessage, expanded: bool) -> None:
+            super().__init__()
+            self.widget = widget
+            self.expanded = expanded
+
+    DEFAULT_CSS = """
+    RubricResultMessage {
+        height: auto;
+        padding: 0 1;
+        margin: 0 0 1 0;
+        color: $text-muted;
+        border-left: wide $warning;
+    }
+
+    RubricResultMessage .rubric-result-summary {
+        height: auto;
+    }
+
+    RubricResultMessage .rubric-result-details-scroll {
+        display: none;
+        height: auto;
+        max-height: 16;
+        margin: 1 0 0 2;
+        overflow-y: auto;
+        scrollbar-size-vertical: 1;
+    }
+
+    RubricResultMessage .rubric-result-details {
+        height: auto;
+        padding: 0;
+    }
+
+    RubricResultMessage .rubric-result-hint {
+        height: auto;
+        margin-left: 2;
+        color: $text-muted;
+    }
+
+    RubricResultMessage.-expanded .rubric-result-details-scroll {
+        display: block;
+    }
+    """
+
+    _expanded: var[bool] = var(False, toggle_class="-expanded")
+
+    def __init__(
+        self,
+        summary: str,
+        details: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._summary = summary
+        self._details = details
+        self._hint_widget: _RubricResultToggle | None = None
+
+    def compose(self) -> ComposeResult:
+        yield _RubricResultToggle(
+            Content.styled(self._summary, "dim italic"),
+            classes="rubric-result-summary",
+        )
+        with VerticalScroll(classes="rubric-result-details-scroll"):
+            yield Static(
+                Content(self._details),
+                classes="rubric-result-details",
+            )
+        yield _RubricResultToggle("", classes="rubric-result-hint")
+
+    def on_mount(self) -> None:
+        self._hint_widget = self.query_one(
+            ".rubric-result-hint",
+            _RubricResultToggle,
+        )
+        if not self._details:
+            self._hint_widget.display = False
+            return
+        self._update_hint()
+
+    def toggle_details(self) -> None:
+        if self._details:
+            self._expanded = not self._expanded
+
+    def watch__expanded(self, expanded: bool) -> None:
+        self._update_hint()
+        if self.is_attached:
+            self.post_message(self.ExpansionChanged(self, expanded))
+
+    def _update_hint(self) -> None:
+        if self._hint_widget is None or not self._details:
+            return
+        action = "hide" if self._expanded else "show"
+        self._hint_widget.update(
+            Content.styled(f"click or Ctrl+O to {action} details", "dim italic")
+        )
+
+    @on(Click, "_RubricResultToggle")
+    def _on_toggle_click(self, event: Click) -> None:
+        event.stop()
+        self.toggle_details()

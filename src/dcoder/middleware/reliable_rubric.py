@@ -316,6 +316,10 @@ with warnings.catch_warnings():
 
             resolved_model = resolve_model(self._model)
             self._resolved_model = resolved_model
+            logger.debug(
+                "[HITL_TRACE_DEBUG] ReliableRubric._ensure_grader created agent | grader_middleware=%s",
+                [getattr(m, "name", type(m).__name__) for m in self._grader_middleware],
+            )
             self._grader = create_agent(
                 model=resolved_model,
                 system_prompt=self._system_prompt,

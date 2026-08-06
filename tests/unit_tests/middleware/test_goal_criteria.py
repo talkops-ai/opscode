@@ -1,12 +1,22 @@
-"""Unit tests for GoalCriteriaMiddleware — types, budget middleware, and state management."""
+"""Unit tests for GoalCriteriaMiddleware — types, budget middleware, state management, and agent creation."""
+
+from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.tools import tool
 
 from dcoder.middleware.goal_criteria import (
+    GoalAmendRequest,
+    GoalCreateRequest,
+    GoalCriteriaMiddleware,
     GoalProposal,
     _REPOSITORY_RECURSION_LIMIT,
     _STRUCTURED_OUTPUT_TOOL_NAME,
     _WEB_SEARCH_CALL_LIMIT,
+    create_goal_criteria_agent,
+    create_goal_criteria_fallback_agent,
 )
 
 
@@ -45,8 +55,6 @@ class TestGoalCriteriaRequestTypes:
     """Tests for request type structures."""
 
     def test_create_request_structure(self):
-        from dcoder.middleware.goal_criteria import GoalCreateRequest
-
         req: GoalCreateRequest = {
             "kind": "create",
             "request_id": "req-001",
@@ -56,8 +64,6 @@ class TestGoalCriteriaRequestTypes:
         assert req["request_id"] == "req-001"
 
     def test_amend_request_structure(self):
-        from dcoder.middleware.goal_criteria import GoalAmendRequest
-
         req: GoalAmendRequest = {
             "kind": "amend",
             "request_id": "req-002",
@@ -69,8 +75,6 @@ class TestGoalCriteriaRequestTypes:
         assert req["feedback"] == "Add subnet check"
 
     def test_create_request_with_rejection_retry(self):
-        from dcoder.middleware.goal_criteria import GoalCreateRequest
-
         req: GoalCreateRequest = {
             "kind": "create",
             "request_id": "req-003",
@@ -80,3 +84,65 @@ class TestGoalCriteriaRequestTypes:
         }
         assert req["feedback"] == "Too vague, add specifics"
         assert req["previous_criteria"] == "1. VPC exists"
+
+
+class TestGoalCriteriaAgentCreation:
+    """Tests for create_goal_criteria_agent and create_goal_criteria_fallback_agent."""
+
+    def test_create_goal_criteria_agent_with_mock_model(self):
+        from deepagents.backends import StateBackend
+        model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
+        backend = StateBackend()
+        agent = create_goal_criteria_agent(
+            model=model,
+            repository_backend=backend,
+            repository_root="/tmp/repo",
+            context_tools=[],
+        )
+        assert agent is not None
+
+    def test_create_goal_criteria_agent_conflicting_tools_raises(self):
+        model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
+
+        @tool("GoalProposal")
+        def conflicting_tool() -> str:
+            """Conflict with reserved name."""
+            return "conflict"
+
+        with pytest.raises(ValueError, match="Context tool names conflict"):
+            create_goal_criteria_agent(
+                model=model,
+                repository_backend=None,
+                repository_root="/tmp",
+                context_tools=[conflicting_tool],
+            )
+
+    def test_create_goal_criteria_fallback_agent(self):
+        model = GenericFakeChatModel(messages=iter([AIMessage(content="ok")]))
+        fallback_agent = create_goal_criteria_fallback_agent(model=model)
+        assert fallback_agent is not None
+
+
+class TestGoalCriteriaMiddlewareExecution:
+    """Tests for GoalCriteriaMiddleware state lifecycle."""
+
+    def test_middleware_instantiation(self):
+        criteria_agent = MagicMock()
+        fallback_agent = MagicMock()
+        middleware = GoalCriteriaMiddleware(
+            criteria_agent=criteria_agent,
+            fallback_agent=fallback_agent,
+        )
+        assert middleware._criteria_agent is criteria_agent
+        assert middleware._fallback_agent is fallback_agent
+
+    def test_before_agent_no_request_passthrough(self):
+        from typing import Any, cast
+        middleware = GoalCriteriaMiddleware(
+            criteria_agent=MagicMock(),
+            fallback_agent=MagicMock(),
+        )
+        state = cast(Any, {"messages": []})
+        runtime = MagicMock()
+        result = middleware.before_agent(state, runtime)
+        assert result is None

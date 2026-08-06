@@ -10,6 +10,7 @@ to avoid flooding the event queue.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 
@@ -25,11 +26,87 @@ from dcoder.ui._tool_stream import (
     count_unemitted_tool_calls,
 )
 
+from dcoder.config.settings import get_glyphs
+
 if TYPE_CHECKING:
     from dcoder.ui.messages import MessageList
     from dcoder.ui.status import StatusBar
 
 logger = logging.getLogger(__name__)
+
+
+def _format_rubric_event(data: dict[str, Any]) -> str | None:
+    """Format a concise rubric custom-stream event for the transcript."""
+    glyphs = get_glyphs()
+    event_type = data.get("type")
+    if event_type == "rubric_evaluation_start":
+        iteration = data.get("iteration", 0)
+        show_iteration = data.get("show_iteration") is True
+        label = (
+            f" (iteration {iteration + 1})"
+            if show_iteration and isinstance(iteration, int)
+            else ""
+        )
+        return f"{glyphs.hourglass} Checking acceptance criteria{label}{glyphs.ellipsis}"
+    if event_type != "rubric_evaluation_end":
+        return None
+
+    result = data.get("result")
+    if result is None:
+        return None
+    if result == "satisfied":
+        return f"{glyphs.checkmark} Acceptance criteria satisfied"
+    if result == "needs_revision":
+        return f"{glyphs.retry} Acceptance criteria not yet satisfied"
+    if result == "max_iterations_reached":
+        return f"{glyphs.warning} Acceptance criteria not yet satisfied (iteration limit reached)"
+    if result == "failed":
+        return f"{glyphs.warning} Rubric is invalid or cannot be evaluated"
+    if result == "grader_error":
+        return f"{glyphs.warning} Acceptance criteria check failed"
+    return f"{glyphs.warning} Acceptance criteria check ended"
+
+
+def _format_rubric_details(data: dict[str, Any], *, goal_active: bool = False) -> str:
+    """Format complete grader details without serializing or truncating payloads."""
+    result = data.get("result")
+    if result in {None, "satisfied"}:
+        return ""
+
+    sections: list[str] = []
+    explanation = str(data.get("explanation") or "").strip()
+    if explanation:
+        sections.append(f"Explanation\n{explanation}")
+
+    criteria = data.get("criteria")
+    failing: list[tuple[str, str]] = []
+    if isinstance(criteria, list):
+        for criterion in criteria:
+            if isinstance(criterion, dict) and criterion.get("passed") is False:
+                name = str(criterion.get("name") or "Unnamed criterion").strip()
+                gap = str(criterion.get("gap") or "").strip()
+                failing.append((name, gap))
+    if failing:
+        lines = ["Unmet criteria"]
+        for name, gap in failing:
+            lines.append(f"- {name}" + (f"\n  {gap}" if gap else ""))
+        sections.append("\n".join(lines))
+
+    if result == "max_iterations_reached" and goal_active:
+        next_step = (
+            "The goal remains active. Continue with another prompt to resume or "
+            "retry, use `/goal <objective>` to amend it, or `/goal clear` to clear it."
+        )
+    elif result in {"needs_revision", "max_iterations_reached"}:
+        next_step = "Address every unmet criterion, then retry the check."
+    elif result == "failed":
+        next_step = "Review or replace the rubric before grading again."
+    elif result == "grader_error":
+        next_step = "Retry the check, or choose a different grader model."
+    else:
+        next_step = "Review the grader details before continuing."
+    sections.append(f"Next step\n{next_step}")
+    return "\n\n".join(sections)
 
 
 def _format_thinking_tags(text: str) -> str:
@@ -262,6 +339,7 @@ class TextualAdapter:
         self._active_tools_map: dict[str, str] = {}
         self._approval_events: dict[str, asyncio.Event] = {}
         self._approval_responses: dict[str, bool] = {}
+        self._turn_number = 0
 
     @property
     def stats(self) -> SessionStats:
@@ -337,7 +415,30 @@ class TextualAdapter:
                 elif goal_state.rubric:
                     input_msg["_sticky_rubric"] = goal_state.rubric
                     input_msg["rubric"] = goal_state.rubric
-        config = {"configurable": {"thread_id": thread_id}}
+
+        import uuid
+        from dcoder.config.metadata import build_stream_config
+
+        self._turn_number += 1
+        turn_id = str(uuid.uuid4())
+        auto_approve_active = bool(getattr(self, "_auto_approve", False))
+        approval_mode_str = "yolo" if auto_approve_active else "manual"
+
+        eff = None
+        if self._app is not None:
+            eff = getattr(self._app, "_reasoning_effort", None) or getattr(
+                getattr(self._app, "settings", None), "reasoning_effort", None
+            )
+
+        config = await asyncio.to_thread(
+            build_stream_config,
+            thread_id,
+            getattr(self, "_assistant_id", "agent"),
+            turn_id=turn_id,
+            turn_number=self._turn_number,
+            auto_approve=auto_approve_active,
+            reasoning_effort=eff or "medium",
+        )
         logger.debug("TUI: stream_turn start, thread_id: %s, context: %s", thread_id, context)
 
         start_t = time.time()
@@ -392,9 +493,37 @@ class TextualAdapter:
                     is_main_agent = ns_key == ()
 
                     if current_stream_mode == "custom":
-                        # We don't handle rubric messages natively in dcoder yet,
-                        # but we safely ignore custom mode to avoid breaking
-                        pass
+                        if isinstance(data, dict):
+                            rubric_msg = data
+                            formatted_event = _format_rubric_event(rubric_msg)
+                            if formatted_event is not None and is_main_agent and self._messages is not None:
+                                details = (
+                                    _format_rubric_details(rubric_msg, goal_active=True)
+                                    if rubric_msg.get("type") == "rubric_evaluation_end"
+                                    else ""
+                                )
+                                from dcoder.ui.messages import RubricResultMessage, SystemMessage, ErrorMessage
+                                if rubric_msg.get("type") == "rubric_evaluation_end":
+                                    if self._app is not None and hasattr(self._app, "_handle_rubric_evaluation_end"):
+                                        try:
+                                            self._app._handle_rubric_evaluation_end(rubric_msg)
+                                        except Exception:
+                                            pass
+                                    if rubric_msg.get("result") == "grader_error":
+                                        widget = ErrorMessage(
+                                            "Acceptance-criteria grading failed because of a grader or "
+                                            "infrastructure error. The goal remains active, and its "
+                                            "completion request is still pending; it will be re-graded on "
+                                            "your next turn."
+                                        )
+                                    elif details:
+                                        widget = RubricResultMessage(formatted_event, details)
+                                    else:
+                                        widget = SystemMessage(formatted_event)
+                                else:
+                                    widget = SystemMessage(formatted_event)
+                                self._messages.mount(widget)
+                        continue
 
                     elif current_stream_mode == "updates":
                         if not isinstance(data, dict):
@@ -434,6 +563,37 @@ class TextualAdapter:
                                 if self._status_bar is not None:
                                     self._status_bar.set_tokens(context_toks)
 
+                            model_spec = getattr(self._app, "_model", "") if self._app else ""
+                            provider_part = ""
+                            model_part = ""
+                            if ":" in model_spec:
+                                provider_part, model_part = model_spec.split(":", 1)
+                            else:
+                                model_part = model_spec
+                                if self._app and hasattr(self._app, "_settings"):
+                                    provider_part = getattr(self._app._settings, "model_provider", "")
+
+                            resp_meta = getattr(msg_obj, "response_metadata", {}) or {}
+                            if isinstance(resp_meta, dict):
+                                model_part = resp_meta.get("model_name") or resp_meta.get("model") or model_part
+
+                            if model_part:
+                                try:
+                                    from dcoder.utils.cost_estimation import estimate_cost
+                                    cost = estimate_cost(usage_meta, model_name=model_part, provider=provider_part)
+                                    if cost is not None and cost > 0:
+                                        self._stats.total_cost_usd += cost
+                                        if self._app:
+                                            current_cost = getattr(self._app, "_session_cost_usd", 0.0)
+                                            new_cost = current_cost + cost
+                                            setattr(self._app, "_session_cost_usd", new_cost)
+                                            if self._status_bar is not None:
+                                                self._status_bar.set_cost(new_cost)
+                                        elif self._status_bar is not None:
+                                            self._status_bar.set_cost(self._stats.total_cost_usd)
+                                except Exception:
+                                    pass
+
                         if msg_obj.__class__.__name__ == "ToolMessage":
                             call_id = getattr(msg_obj, "tool_call_id", "") or ""
                             raw_name = getattr(msg_obj, "name", "") or ""
@@ -466,7 +626,7 @@ class TextualAdapter:
                                             if self._set_spinner:
                                                 await self._set_spinner("Thinking")
 
-                                        if self._messages is not None:
+                                        if self._messages is not None and is_main_agent:
                                             self._messages.append_assistant_token(text)
                                             
                                 elif block_type in {"tool_call_chunk", "tool_call"}:
@@ -507,9 +667,14 @@ class TextualAdapter:
                 if self._cancel_event.is_set():
                     break
 
-                logger.debug("TUI: stream loop complete, finishing assistant message")
+                logger.debug("TUI: stream loop complete, finishing assistant message and regrouping tools")
                 if self._messages is not None:
                     self._messages.finish_assistant_message()
+                    regroup_fn = getattr(self._messages, "regroup_completed_tools", None)
+                    if callable(regroup_fn):
+                        res = regroup_fn()
+                        if inspect.isawaitable(res):
+                            await res
                     
                 if pending_interrupts:
                     for int_id, int_val in pending_interrupts:
@@ -555,6 +720,8 @@ class TextualAdapter:
             logger.exception("TUI: stream_turn Exception: %s", e)
             if self._messages is not None:
                 self._messages.finish_assistant_message()
+                from dcoder.ui.messages import ErrorMessage
+                self._messages.mount(ErrorMessage(f"Agent execution failed: {e}"))
             if self._app:
                 self._app.post_message(self.StreamError(str(e)))
             raise

@@ -147,6 +147,9 @@ EXTERNAL_EVENT_SOCKET_PATH = "DCODER_CODE_EXTERNAL_EVENT_SOCKET_PATH"
 EXTRA_SKILLS_DIRS = "DCODER_CODE_EXTRA_SKILLS_DIRS"
 """Colon-separated paths added to the skill containment allowlist."""
 
+EXPERIMENTAL = "DCODER_CODE_EXPERIMENTAL"
+"""Enable experimental features across DCoder."""
+
 HIDE_CWD = "DCODER_CODE_HIDE_CWD"
 """Hide local path displays in the TUI footer and the editable-install path in
 the startup splash when enabled.

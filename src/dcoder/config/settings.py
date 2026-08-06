@@ -559,5 +559,6 @@ def is_ascii_mode() -> bool:
     return _detect_charset_mode() == CharsetMode.ASCII
 
 def newline_shortcut() -> str:
-    return "Shift+Enter" if sys.platform == "darwin" else "Ctrl+J"
+    """Return terminal-appropriate label for newline shortcut (Option+Enter on Mac, Ctrl+J elsewhere)."""
+    return "Option+Enter" if sys.platform == "darwin" else "Ctrl+J"
 

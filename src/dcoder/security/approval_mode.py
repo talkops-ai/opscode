@@ -101,6 +101,30 @@ def read_approval_mode_from_store(store: object, key: str | None) -> ApprovalMod
     return None
 
 
+async def aread_approval_mode_from_store(store: object, key: str | None) -> ApprovalMode | None:
+    """Read a live approval mode asynchronously from the server-side LangGraph Store."""
+    if store is None or not isinstance(key, str) or not key:
+        return None
+
+    aget = getattr(store, "aget", None)
+    if aget is not None:
+        try:
+            item = await aget(APPROVAL_MODE_NAMESPACE, key)
+            if item is not None:
+                value = _item_value(item)
+                if isinstance(value, Mapping):
+                    mode_val = value.get("mode")
+                    if isinstance(mode_val, str):
+                        return coerce_approval_mode(mode_val)
+                    auto_app = value.get("auto_approve")
+                    if isinstance(auto_app, bool):
+                        return ApprovalMode.YOLO if auto_app else ApprovalMode.MANUAL
+        except Exception:
+            logger.warning("Could not read approval-mode store item asynchronously", exc_info=True)
+            return None
+    return read_approval_mode_from_store(store, key)
+
+
 async def awrite_approval_mode(
     agent: object,
     thread_id: str,

@@ -2,21 +2,22 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from dcoder.agent.factory import _subagent_cli_middleware, create_dcoder_agent
-from dcoder.middleware.auto_mode import AutoModeHITLMiddleware
+from dcoder.middleware.auto_mode import AutoModeHITLMiddleware, AsyncApprovalHITLMiddleware
+from langchain.agents.middleware.human_in_the_loop import HumanInTheLoopMiddleware
 from deepagents.middleware import FilesystemMiddleware
 
 
 def test_subagent_cli_middleware_injects_hitl():
-    # When interrupt_on is None, it should not inject AutoModeHITLMiddleware
+    # When interrupt_on is None, it should not inject HITL middleware
     middlewares_without_hitl = _subagent_cli_middleware(
         has_explicit_model=False,
         assistant_id="test",
         subagent_name="test_sub",
         interrupt_on=None,
     )
-    assert not any(isinstance(mw, AutoModeHITLMiddleware) for mw in middlewares_without_hitl)
+    assert not any(isinstance(mw, HumanInTheLoopMiddleware) for mw in middlewares_without_hitl)
 
-    # When interrupt_on is provided, it should inject AutoModeHITLMiddleware
+    # When interrupt_on is provided, it should inject HITL middleware
     interrupt_on_config = {"write_file": {}}
     middlewares_with_hitl = _subagent_cli_middleware(
         has_explicit_model=False,
@@ -24,7 +25,7 @@ def test_subagent_cli_middleware_injects_hitl():
         subagent_name="test_sub",
         interrupt_on=interrupt_on_config,
     )
-    assert any(isinstance(mw, AutoModeHITLMiddleware) for mw in middlewares_with_hitl)
+    assert any(isinstance(mw, HumanInTheLoopMiddleware) for mw in middlewares_with_hitl)
 
 
 @patch("deepagents.create_deep_agent")

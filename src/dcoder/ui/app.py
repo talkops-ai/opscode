@@ -22,12 +22,19 @@ client to the adapter, enabling agent prompts.
 
 from __future__ import annotations
 
+try:
+    import dcoder._textual_patches  # noqa: F401
+except ImportError:
+    pass
+
 import asyncio
 import logging
 import sys
 import time
+import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, cast
@@ -47,6 +54,7 @@ from dcoder.ui.approval import (
     ApprovalModalScreen,
     assess_tool_risk,
 )
+from dcoder.ui.widgets.goal_review import GoalReviewMenu
 from dcoder.ui.autocomplete import AutocompletePopup
 from dcoder.ui.chat_input import ChatInput, InputMode
 from dcoder.ui.command_registry import (
@@ -82,6 +90,10 @@ from dcoder.ui.toast import show_toast
 from dcoder.ui.welcome import WelcomeBanner
 
 from dcoder.ui.permission_store import PermissionStore, load_permission_store
+from dcoder.utils.git import (
+    read_git_branch_from_filesystem,
+    read_git_branch_via_subprocess,
+)
 
 
 
@@ -234,6 +246,11 @@ class DCoderApp(App):
         self._resume_thread = resume_thread
         self._goal = goal
         self._agent_thread_id: str | None = None
+        self._cwd: str = str(Path.cwd())
+        self._status_bar: StatusBar | None = None
+        self._git_branch_refresh_task: asyncio.Task[None] | None = None
+        self._session_cost_usd: float = 0.0
+        self._context_tokens: int = 0
 
         # ── State Flags ──────────────────────────────────
         self._agent_running = False
@@ -250,6 +267,8 @@ class DCoderApp(App):
         self._goal_state_lock = asyncio.Lock()
         self._goal_state_mutating = False
         self._agent_reconciling = False
+        self._pending_goal_review_widget: Any | None = None
+        self._pending_goal_review_future: Any | None = None
 
         # ── Worker Handles ───────────────────────────────
         self._agent_worker: Worker[None] | None = None
@@ -325,7 +344,7 @@ class DCoderApp(App):
         with Container(id="bottom-container"):
             yield GoalStatusPanel(id="goal-status-panel")
             yield ChatInput(id="input-area")
-        yield StatusBar(id="status-bar")
+        yield StatusBar(cwd=self._cwd, id="status-bar")
 
     # ── Lifecycle ────────────────────────────────────────
 
@@ -335,10 +354,16 @@ class DCoderApp(App):
 
         messages_widget = self.query_one("#messages", MessageList)
         status_bar = self.query_one("#status-bar", StatusBar)
+        self._status_bar = status_bar
+        self._schedule_git_branch_refresh()
         eff = getattr(self, "_reasoning_effort", None) or (getattr(getattr(self, "settings", None), "reasoning_effort", None))
+        if not eff and self._model:
+            from dcoder.model.reasoning import default_effort_for_model
+            eff = default_effort_for_model(self._model)
         _provider, _model = _split_model_spec(self._model or "")
         status_bar.set_model(provider=_provider, model=_model, effort=eff or "")
         status_bar.set_approval_mode("manual" if not self._auto_approve else "auto")
+        self._reset_thread_usage(0.0, 0)
 
         # Create adapter early with client=None (will be bound on ServerReady)
         self._adapter = TextualAdapter(
@@ -915,9 +940,6 @@ class DCoderApp(App):
                     except Exception:
                         pass
 
-                if self._chat_input:
-                    self._chat_input.focus()
-
                 # ── Goal state synchronization from checkpoint ──
                 # Reference: app.py L16072-L16094.
                 await self._sync_goal_state_from_checkpoint(
@@ -940,6 +962,7 @@ class DCoderApp(App):
                 await self._process_next_from_queue()
         finally:
             self._agent_reconciling = False
+            self._focus_chat_input_after_refresh()
 
     # ── Goal State Management ────────────────────────────
     #
@@ -1854,6 +1877,12 @@ class DCoderApp(App):
         except Exception:
             pass
 
+        try:
+            from dcoder.commands.power.goal import GoalHandler
+            GoalHandler._sync_status_rubric(self, goal_state)
+        except Exception:
+            pass
+
     def _restore_goal_rubric_state(self, payload: dict[str, Any]) -> None:
         """Restore active goal and rubric state from thread payload.
 
@@ -1890,6 +1919,7 @@ class DCoderApp(App):
             UserMessage,
         )
 
+        self._reset_thread_usage(0.0, 0)
         state_values = await self._get_thread_state_values(thread_id)
         raw_messages = state_values.get("messages", [])
         payload = self._goal_rubric_payload_from_state(state_values, raw_messages)
@@ -2068,14 +2098,46 @@ class DCoderApp(App):
             if tc_id in messages_container._tool_calls:
                 messages_container._tool_calls[tc_id].set_rejected()
 
-        # Regroup completed tool runs into collapsible summaries (reference L16991, L17149-L17270)
+        # Restore context tokens and cumulative estimated cost from message history
+        restored_cost = 0.0
+        restored_tokens = 0
+        model_spec = getattr(self, "_model", "") or ""
+        if ":" in model_spec:
+            provider_part, model_part = model_spec.split(":", 1)
+        else:
+            model_part = model_spec
+            provider_part = getattr(getattr(self, "_settings", None), "model_provider", "") or ""
+
+        from dcoder.utils.cost_estimation import estimate_cost
+        for msg in raw_messages:
+            usage_meta = (
+                getattr(msg, "usage_metadata", None)
+                or (getattr(msg, "response_metadata", None) or {}).get("usage")
+                or (getattr(msg, "response_metadata", None) or {}).get("token_usage")
+            )
+            if isinstance(usage_meta, dict):
+                inp = usage_meta.get("input_tokens", 0) or 0
+                out = usage_meta.get("output_tokens", 0) or 0
+                if inp or out:
+                    restored_tokens = inp + out
+                if model_part:
+                    m_name = (getattr(msg, "response_metadata", {}) or {}).get("model_name") or model_part
+                    c = estimate_cost(usage_meta, model_name=m_name, provider=provider_part)
+                    if c is not None and c > 0:
+                        restored_cost += c
+
+        self._reset_thread_usage(restored_cost, restored_tokens)
+
+        # Regroup completed historical tool calls into collapsible summaries (reference L7897, L7955)
         await self._regroup_completed_tools()
 
         logger.info(
-            "TUI: _load_thread_history completed for thread %s (raw_messages=%d, mounted_widgets=%d)",
+            "TUI: _load_thread_history completed for thread %s (raw_messages=%d, mounted_widgets=%d, tokens=%d, cost=$%.4f)",
             thread_id,
             len(raw_messages),
             len(messages_container.children),
+            self._context_tokens,
+            self._session_cost_usd,
         )
 
         # Scroll to bottom after history loads (reference L16769-L16774)
@@ -2094,83 +2156,21 @@ class DCoderApp(App):
         try:
             from dcoder.ui.messages import MessageList
             messages = self.query_one("#messages", MessageList)
-            group = messages._active_tool_group
-            messages._active_tool_group = None
-            if group is not None and getattr(group, "is_attached", False):
-                fn = getattr(group, "close", None)
-                if callable(fn):
-                    fn()
+            messages.close_active_tool_group()
         except Exception:
             logger.exception("Failed to close active tool group")
 
     async def _regroup_completed_tools(self) -> None:
         """Fold runs of completed tool calls into collapsible group summaries.
 
-        Scans the messages container for maximal runs of consecutive,
-        successfully-completed tool calls and inserts a ToolGroupSummary that
-        collapses each run into a single dim line.
-
         Reference: deepagents_code/app.py L17149-L17270.
         """
-        from textual.widget import Widget
-        from dcoder.ui.messages import (
-            _TOOL_GROUP_EXCLUSIONS,
-            MessageList,
-            ToolCallMessage,
-            ToolGroupSummary,
-        )
-
         try:
+            from dcoder.ui.messages import MessageList
             messages = self.query_one("#messages", MessageList)
-        except NoMatches:
-            return
-
-        self._close_active_tool_group()
-
-        run_tools: list[ToolCallMessage] = []
-        run_collapsible: list[Widget] = []
-        run_anchor: Widget | None = None
-        folded_runs_count = 0
-
-        async def flush() -> None:
-            nonlocal run_tools, run_collapsible, run_anchor, folded_runs_count
-            if run_tools and run_anchor is not None and run_anchor.is_attached:
-                summary = ToolGroupSummary(
-                    tools=list(run_tools),
-                    collapsible=list(run_collapsible),
-                    live=False,
-                )
-                for widget in run_collapsible:
-                    widget.add_class("-grouped")
-                try:
-                    await messages.mount(summary, before=run_anchor)
-                    folded_runs_count += 1
-                except Exception:
-                    logger.warning("Failed to mount tool group summary", exc_info=True)
-            run_tools = []
-            run_collapsible = []
-            run_anchor = None
-
-        with self.batch_update():
-            for child in list(messages.children):
-                if isinstance(child, ToolCallMessage):
-                    groupable = (
-                        child.tool_name not in _TOOL_GROUP_EXCLUSIONS
-                        and child.is_success
-                        and not child.has_class("-grouped")
-                    )
-                    if not groupable:
-                        await flush()
-                        continue
-                    if run_anchor is None:
-                        run_anchor = child
-                    run_tools.append(child)
-                    run_collapsible.append(child)
-                    continue
-                await flush()
-            await flush()
-
-        logger.info("TUI: _regroup_completed_tools folded %d tool group runs", folded_runs_count)
+            await messages.regroup_completed_tools()
+        except Exception:
+            logger.exception("Failed to regroup completed tools")
 
 
     async def resume_thread(self, thread_id: str, *, is_new: bool = False) -> None:
@@ -2190,6 +2190,7 @@ class DCoderApp(App):
 
         if is_new:
             self._restore_goal_rubric_state({})
+            self._reset_thread_usage(0.0, 0)
         else:
             await self._load_thread_history(thread_id)
             if hasattr(self, "_sync_goal_state_from_checkpoint"):
@@ -2339,12 +2340,96 @@ class DCoderApp(App):
         """Get previously saved reasoning effort."""
         return getattr(self, "_prev_effort", None)
 
+    def _cancel_git_branch_refresh_task(self) -> None:
+        """Cancel and clear any in-flight background branch refresh task."""
+        prior_task = self._git_branch_refresh_task
+        if prior_task is not None and not prior_task.done():
+            prior_task.cancel()
+        self._git_branch_refresh_task = None
+
+    def _reset_thread_usage(self, cost_usd: float = 0.0, context_tokens: int = 0) -> None:
+        """Reset active thread token and cost metrics in the app state and status bar.
+
+        Follows reference deepagents_code/app.py L7473-L7491 (_reset_thread_usage).
+        """
+        from dcoder.utils.session_stats import SessionStats
+
+        self._session_cost_usd = max(0.0, cost_usd)
+        self._context_tokens = max(0, context_tokens)
+        if self._adapter:
+            self._adapter._stats = SessionStats()
+            if cost_usd > 0:
+                self._adapter._stats.total_cost_usd = cost_usd
+        if self._status_bar:
+            self._status_bar.set_tokens(self._context_tokens)
+            self._status_bar.set_cost(self._session_cost_usd)
+
+    async def _refresh_git_branch(self) -> None:
+        """Refresh the git branch display on the status bar."""
+        try:
+            cwd = getattr(self, "_cwd", str(Path.cwd()))
+            branch = read_git_branch_from_filesystem(cwd)
+            if branch is None:
+                branch = await asyncio.to_thread(read_git_branch_via_subprocess, cwd)
+            if self._status_bar:
+                self._status_bar.branch = branch
+        except Exception:
+            logger.warning("Git branch resolution failed", exc_info=True)
+
+    async def _refresh_git_branch_subprocess_fallback(self, cwd: str) -> None:
+        """Run the `git rev-parse` fallback off-thread for unusual repo layouts."""
+        try:
+            branch = await asyncio.to_thread(read_git_branch_via_subprocess, cwd)
+        except Exception:
+            logger.warning("Git branch subprocess fallback failed", exc_info=True)
+            return
+        if self._status_bar:
+            self._status_bar.branch = branch
+
+    def _schedule_git_branch_refresh(self) -> None:
+        """Refresh the git branch, inline when possible."""
+        if getattr(self, "_exit", False):
+            return
+
+        cwd = getattr(self, "_cwd", str(Path.cwd()))
+        try:
+            branch = read_git_branch_from_filesystem(cwd)
+        except Exception:
+            logger.warning("Git branch filesystem probe failed", exc_info=True)
+            return
+
+        if branch is not None:
+            if self._status_bar:
+                self._status_bar.branch = branch
+            self._cancel_git_branch_refresh_task()
+            return
+
+        self._cancel_git_branch_refresh_task()
+        refresh_task = asyncio.create_task(
+            self._refresh_git_branch_subprocess_fallback(cwd),
+        )
+        self._git_branch_refresh_task = refresh_task
+
+        def _finalize_git_branch_refresh(task: asyncio.Task[None]) -> None:
+            if self._git_branch_refresh_task is task:
+                self._git_branch_refresh_task = None
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.warning(
+                    "Background git branch refresh failed unexpectedly",
+                    exc_info=True,
+                )
+
+        refresh_task.add_done_callback(_finalize_git_branch_refresh)
+
     def _update_auto_mode_status_bar(self, mode: str) -> None:
         """Update TUI status bar indicator badge for auto-mode."""
         try:
-            status_bar = self.query_one("#status-bar", StatusBar)
-            badge = "🟢 AUTO" if mode == "auto" else "🔴 MANUAL"
-            status_bar.set_status(f"Ready ({badge})")
+            status_bar = self._status_bar or self.query_one("#status-bar", StatusBar)
+            status_bar.set_approval_mode(mode)
         except NoMatches:
             pass
 
@@ -2396,24 +2481,54 @@ class DCoderApp(App):
         else:
             try:
                 messages = self.query_one("#messages", MessageList)
-                messages.mount(
-                    ApprovalMenu(event.tool_name, event.call_id, event.args, risk=risk)
+                menu_id = f"approval-menu-{uuid.uuid4().hex[:8]}"
+                menu = ApprovalMenu(
+                    event.tool_name,
+                    event.call_id,
+                    event.args,
+                    id=menu_id,
+                    risk=risk,
+                    auto_mode_eligible=not getattr(self, "_sandbox_active", False),
                 )
+                messages.mount_inline_prompt(menu)
             except NoMatches:
                 pass
+
+    @on(ApprovalMenu.Decided)
+    def _on_approval_menu_decided(self, event: ApprovalMenu.Decided) -> None:
+        decision = event.decision
+        dec_type = decision.get("type")
+
+        if dec_type == "auto_approve_all":
+            self._auto_approve = True
+            self._approval_mode = "auto"
+            self.notify("Enabled Auto for this thread.", severity="information", timeout=3)
+            if self._adapter:
+                self._adapter._auto_approve = True
+
+        if self._adapter and event.call_id:
+            self._adapter.submit_approval(event.call_id, event.approved)
+
+        if not event.approved and hasattr(self, "_permission_store") and event.call_id:
+            self._permission_store.track_denied(
+                tool_name=event.tool_name,
+                call_id=event.call_id,
+                comment=event.comment,
+            )
+
+        if self._chat_input:
+            self.call_after_refresh(self._chat_input.focus)
 
     @on(ApprovalDecided)
     def _on_approval_decided(self, event: ApprovalDecided) -> None:
         if self._adapter:
             self._adapter.submit_approval(event.call_id, event.approved)
-        # Track denied actions in permission store for "Recently Denied" tab
         if not event.approved and hasattr(self, "_permission_store"):
             self._permission_store.track_denied(
                 tool_name=event.tool_name,
                 call_id=event.call_id,
                 comment=event.comment,
             )
-        # Refocus chat input after approval
         if self._chat_input:
             self.call_after_refresh(self._chat_input.focus)
 
@@ -2446,9 +2561,13 @@ class DCoderApp(App):
         try:
             status_bar = self.query_one("#status-bar", StatusBar)
             total_tokens = event.stats.input_tokens + event.stats.output_tokens
-            status_bar.set_tokens(total_tokens)
-            if event.stats.total_cost_usd:
-                status_bar.set_cost(event.stats.total_cost_usd)
+            if total_tokens > 0:
+                self._context_tokens = total_tokens
+                status_bar.set_tokens(total_tokens)
+            cost_to_display = max(event.stats.total_cost_usd, self._session_cost_usd)
+            if cost_to_display > 0:
+                self._session_cost_usd = cost_to_display
+                status_bar.set_cost(cost_to_display)
             status_bar.set_status("Ready")
         except NoMatches:
             pass
@@ -2457,7 +2576,11 @@ class DCoderApp(App):
     @on(TextualAdapter.StreamError)
     async def _on_stream_error(self, event: TextualAdapter.StreamError) -> None:
         show_toast(self, event.error, title="Stream Error", severity="error")
-        # Note: queue draining is handled by _cleanup_agent_task, not here
+        try:
+            messages = self.query_one("#messages", MessageList)
+            messages.mount(ErrorMessage(event.error))
+        except NoMatches:
+            pass
 
     # ── Global Actions ───────────────────────────────────
 
@@ -2478,6 +2601,7 @@ class DCoderApp(App):
         self._pending_messages.clear()
         self._queued_widgets.clear()
         self._restore_goal_rubric_state({})
+        self._reset_thread_usage(0.0, 0)
         try:
             messages = self.query_one("#messages", MessageList)
             messages.clear()
@@ -2893,7 +3017,11 @@ class DCoderApp(App):
             if settings_obj:
                 settings_obj.reasoning_effort = effort
 
-        eff_display = effort or getattr(self, "_reasoning_effort", "") or ""
+        eff_val = effort or getattr(self, "_reasoning_effort", None)
+        if not eff_val and spec:
+            from dcoder.model.reasoning import default_effort_for_model
+            eff_val = default_effort_for_model(spec) or ""
+        eff_display: str = str(eff_val) if eff_val else ""
 
         if self._adapter:
             pass
@@ -2959,7 +3087,9 @@ class DCoderApp(App):
             try:
                 sb = self.query_one("#status-bar", StatusBar)
                 _prov, _mdl = _split_model_spec(model_spec)
-                sb.set_model(provider=_prov, model=_mdl, effort="")
+                from dcoder.model.reasoning import default_effort_for_model
+                def_eff = default_effort_for_model(model_spec) or ""
+                sb.set_model(provider=_prov, model=_mdl, effort=def_eff)
             except Exception:
                 pass
             await self._mount_message(SystemMessage(f"Reasoning effort override cleared for `{model_spec}`."))
@@ -3084,33 +3214,157 @@ class DCoderApp(App):
 
     # ── Goal Review ──────────────────────────────────────
 
-    def _open_goal_review(self, objective: str, rubric: str) -> None:
-        """Push the goal review modal for user approval of generated rubric.
+    def _focus_chat_input_after_refresh(self) -> None:
+        """Restore chat input focus after an inline prompt is removed or turn completes.
 
-        Reference: app.py L12428-L12449 + L12600-L12640.
-        The accept path persists the accepted state to the checkpoint and
-        then starts a continuation turn that sends the objective to the
-        agent, matching the reference accept-then-work flow.
+        Reference: deepagents_code/app.py L8817-L8820.
         """
-        from dcoder.ui.goal_review import GoalReviewScreen
+        if self._chat_input:
+            self.call_after_refresh(self._chat_input.focus_input)
 
-        def _on_review_result(result: str | None) -> None:
-            """Handle the review decision."""
-            if result == "accept":
-                # Persist + continuation runs async — schedule on the event loop.
-                asyncio.ensure_future(self._accept_goal_rubric(rubric))
-            elif result == "reject":
-                from dcoder.commands.power.goal import GoalHandler, get_goal_state
+    @on(Worker.StateChanged)
+    def _on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Surface worker state changes and restore focus when agent tasks finish.
 
-                state = get_goal_state(self)
-                feedback = ""  # TODO: capture feedback from the reject dialog
-                state.pending_objective = None
-                state.pending_rubric = None
-                GoalHandler._sync_status_rubric(self, state)
-            # else: cancelled — leave pending state for retry
+        Reference: deepagents_code/app.py L22455-L22485.
+        """
+        from textual.worker import WorkerState
 
-        screen = GoalReviewScreen(objective, rubric)
-        self.push_screen(screen, callback=_on_review_result)
+        worker = event.worker
+        if worker is self._agent_worker and event.state in {
+            WorkerState.SUCCESS,
+            WorkerState.CANCELLED,
+            WorkerState.ERROR,
+        }:
+            self._agent_worker = None
+            self._agent_running = False
+            self._focus_chat_input_after_refresh()
+
+    async def _cancel_pending_goal_review(self, *, context: str = "cleanup") -> None:
+        """Cancel and remove any mounted pending goal review prompt.
+
+        Reference: deepagents_code/app.py L8926-L8946.
+        """
+        logger.debug("Cancelling pending goal review (context=%s)", context)
+        widget = self._pending_goal_review_widget
+        future = self._pending_goal_review_future
+        self._pending_goal_review_widget = None
+        self._pending_goal_review_future = None
+
+        if widget is not None:
+            try:
+                widget.action_cancel()
+            except Exception:
+                pass
+        if future is not None and not future.done():
+            future.cancel()
+        if widget is not None and getattr(widget, "is_mounted", False):
+            try:
+                widget.remove()
+            except Exception:
+                pass
+        self._focus_chat_input_after_refresh()
+
+    def _open_goal_review(self, objective: str, rubric: str, amendment: bool = False) -> None:
+        """Mount the inline goal review widget into messages for user review of criteria.
+
+        Reference: deepagents_code/app.py L9000-L9045.
+        """
+        from dcoder.ui.widgets.goal_review import GoalReviewMenu
+
+        try:
+            messages = self.query_one("#messages", MessageList)
+        except NoMatches:
+            logger.warning("Cannot mount goal review menu: #messages container not found")
+            return
+
+        if self._pending_goal_review_widget is not None:
+            try:
+                self._pending_goal_review_widget.remove()
+            except Exception:
+                pass
+
+        unique_id = f"goal-review-menu-{uuid.uuid4().hex[:8]}"
+        logger.debug("Mounting GoalReviewMenu id=%s for objective=%r", unique_id, objective[:40])
+        menu = GoalReviewMenu(
+            objective,
+            rubric,
+            amendment=amendment,
+            id=unique_id,
+        )
+        self._pending_goal_review_widget = menu
+        messages.mount_inline_prompt(menu)
+
+    @on(GoalReviewMenu.Decided)
+    async def _on_goal_review_decided(self, event: GoalReviewMenu.Decided) -> None:
+        """Handle a goal review decision by processing result and focusing chat input.
+
+        Reference: deepagents_code/app.py L9028-L9046.
+        """
+        if self._pending_goal_review_widget is event.widget:
+            self._pending_goal_review_widget = None
+
+        if event.widget:
+            try:
+                event.widget.remove()
+            except Exception:
+                pass
+
+        result = event.result
+        res_type = result.get("type")
+        logger.debug("GoalReviewMenu decision received: %s", res_type)
+
+        from dcoder.commands.power.goal import GoalHandler, get_goal_state
+
+        state = get_goal_state(self)
+        objective = state.pending_objective or state.objective or ""
+        prev_rubric = state.pending_rubric or state.rubric or ""
+
+        if res_type == "accepted":
+            asyncio.ensure_future(self._accept_goal_rubric(prev_rubric))
+        elif res_type == "edited":
+            new_criteria: str = str(result.get("criteria", prev_rubric))
+            asyncio.ensure_future(self._accept_goal_rubric(new_criteria))
+        elif res_type == "rejected":
+            feedback: str = str(result.get("message", ""))
+            state.pending_objective = None
+            state.pending_rubric = None
+            GoalHandler._sync_status_rubric(self, state)
+
+            req = {
+                "kind": "create",
+                "request_id": str(uuid.uuid4()),
+                "objective": objective,
+                "feedback": feedback,
+                "previous_criteria": prev_rubric,
+            }
+            asyncio.ensure_future(self._run_goal_criteria_request(req))
+        elif res_type == "cancelled":
+            state.pending_objective = None
+            state.pending_rubric = None
+            GoalHandler._sync_status_rubric(self, state)
+
+        self._focus_chat_input_after_refresh()
+
+    def _handle_rubric_evaluation_end(self, rubric_msg: dict[str, Any]) -> None:
+        """Handle grader evaluation completion by updating GoalState and status bar.
+
+        Reference: deepagents_code/app.py L15702-L15715.
+        """
+        from dcoder.commands.power.goal import GoalHandler, get_goal_state
+        state = get_goal_state(self)
+        if not state.objective:
+            return
+
+        result = str(rubric_msg.get("result", "")).lower()
+        logger.debug("Handling rubric_evaluation_end: result=%s for objective=%r", result, state.objective[:40])
+        if result in ("satisfied", "passed", "complete"):
+            state.status = "complete"
+        elif result in ("unsatisfied", "failed", "blocked"):
+            state.status = "blocked"
+
+        GoalHandler._sync_status_rubric(self, state)
+        self._focus_chat_input_after_refresh()
 
 
 
