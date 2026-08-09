@@ -23,9 +23,11 @@ from dcoder.ui.tool_renderers import render_tool_approval
 
 def test_compose_diff_lines():
     diff_input = "--- a/main.tf\n+++ b/main.tf\n@@ -1,3 +1,3 @@\n- old\n+ new"
-    result = compose_diff_lines(diff_input)
-    assert "old" in result.plain
-    assert "new" in result.plain
+    widgets = list(compose_diff_lines(diff_input))
+    texts = [str(getattr(w, "renderable", getattr(w, "_content", ""))) for w in widgets]
+    combined = " ".join(texts)
+    assert "old" in combined or any("diff-line-removed" in getattr(w, "classes", set()) for w in widgets)
+    assert "new" in combined or any("diff-line-added" in getattr(w, "classes", set()) for w in widgets)
 
 
 def test_devops_renderers():

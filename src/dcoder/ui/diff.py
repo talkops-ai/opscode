@@ -1,76 +1,237 @@
-"""Diff display widget for the DCoder TUI.
-
-Renders unified diffs with theme tokens and section collapsing for unchanged lines.
-"""
+"""Enhanced diff widget for displaying unified diffs with line numbers and CSS-driven background highlights."""
 
 from __future__ import annotations
 
 import re
-from rich.text import Text
+from typing import TYPE_CHECKING, Any
+
+from textual.containers import Vertical
+from textual.content import Content
+from textual.widgets import Static
+
+from dcoder.ui import theme
+from dcoder.config.settings import get_glyphs, is_ascii_mode
+
+if TYPE_CHECKING:
+    from textual.app import ComposeResult
 
 _HUNK_RE = re.compile(r"@@ -(\d+)(?:,\d+)? \+(\d+)")
+"""Matches a unified-diff hunk header, capturing the old and new start lines."""
 
 
 def compose_diff_lines(
     diff: str,
-    max_lines: int | None = 150,
-    add_style: str = "green",
-    del_style: str = "red",
-    header_style: str = "cyan",
-    hunk_style: str = "yellow",
-) -> Text:
-    """Compose a Rich Text representation of a unified diff with context line collapsing.
+    max_lines: int | None = 100,
+) -> ComposeResult:
+    """Yield per-line Static widgets for a unified diff.
+
+    Each added/removed line gets a CSS class (`.diff-line-added`,
+    `.diff-line-removed`) so background colors are driven by CSS variables
+    and update automatically on theme change.
 
     Args:
         diff: Unified diff string.
-        max_lines: Max line limit for render.
-        add_style: Style for additions (+).
-        del_style: Style for deletions (-).
-        header_style: Style for file headers (+++/---).
-        hunk_style: Style for hunk headers (@@).
+        max_lines: Maximum number of diff lines to show (None for unlimited).
+
+    Yields:
+        Static widgets — one per diff line — with appropriate CSS classes.
     """
-    output = Text()
+    if not diff:
+        yield Static(Content.styled("No changes detected", "dim"))
+    else:
+        yield from _compose_diff_content(diff, max_lines)
+
+
+def _compose_diff_content(
+    diff: str,
+    max_lines: int | None,
+) -> ComposeResult:
+    """Yield styled diff line widgets for non-empty diff content.
+
+    Args:
+        diff: Non-empty unified diff string.
+        max_lines: Maximum number of diff lines to show (None for unlimited).
+
+    Yields:
+        Static widgets for stats header and individual diff lines.
+    """
+    colors = theme.get_theme_colors()
+    glyphs = get_glyphs()
     lines = diff.splitlines()
 
-    context_buf: list[str] = []
+    # Single pass for stats and max line number (width calculation).
+    additions = 0
+    deletions = 0
+    max_line = 0
+    for ln in lines:
+        if ln.startswith("+"):
+            if not ln.startswith("+++"):
+                additions += 1
+        elif ln.startswith("-"):
+            if not ln.startswith("---"):
+                deletions += 1
+        elif m := _HUNK_RE.match(ln):
+            max_line = max(max_line, int(m.group(1)), int(m.group(2)))
 
-    def flush_context():
-        nonlocal context_buf
-        if not context_buf:
-            return
-        if len(context_buf) > 6:
-            output.append(f"  {context_buf[0]}\n", style="dim")
-            output.append(f"  ... ({len(context_buf) - 2} unchanged lines) ...\n", style="dim italic")
-            output.append(f"  {context_buf[-1]}\n", style="dim")
-        else:
-            for ctx in context_buf:
-                output.append(f"  {ctx}\n", style="dim")
-        context_buf = []
+    # Stats header
+    stats_parts: list[str | tuple[str, str] | Content] = []
+    if additions:
+        stats_parts.append((f"+{additions}", colors.success))
+    if deletions:
+        if stats_parts:
+            stats_parts.append(" ")
+        stats_parts.append((f"-{deletions}", colors.error))
+    if stats_parts:
+        yield Static(Content.assemble(*stats_parts))
 
-    count = 0
+    width = max(3, len(str(max_line + len(lines))))
+
+    old_num = new_num = 0
+    line_count = 0
+
     for line in lines:
-        if max_lines is not None and count >= max_lines:
-            flush_context()
-            output.append(f"\n... ({len(lines) - count} lines truncated)\n", style="dim italic")
+        if max_lines and line_count >= max_lines:
+            yield Static(
+                Content.styled(f"\n... ({len(lines) - line_count} more lines)", "dim")
+            )
             break
 
-        if line.startswith("+++") or line.startswith("---"):
-            flush_context()
-            output.append(f"{line}\n", style=f"bold {header_style}")
+        # Skip file headers (--- and +++)
+        if line.startswith(("---", "+++")):
+            continue
+
+        # Handle hunk headers - just update line numbers, don't display
+        if m := _HUNK_RE.match(line):
+            old_num, new_num = int(m.group(1)), int(m.group(2))
+            continue
+
+        # Handle diff lines - use gutter bar instead of +/- prefix
+        content = line[1:] if line else ""
+
+        if line.startswith("-"):
+            # Deletion — red gutter bar, background via CSS
+            yield Static(
+                Content.assemble(
+                    (f"{glyphs.gutter_bar}", f"{colors.error} bold"),
+                    (f"{old_num:>{width}}", "dim"),
+                    f" {content}",
+                ),
+                classes="diff-line-removed",
+            )
+            old_num += 1
+            line_count += 1
         elif line.startswith("+"):
-            flush_context()
-            output.append(f"{line}\n", style=f"bold {add_style}")
-        elif line.startswith("-"):
-            flush_context()
-            output.append(f"{line}\n", style=f"bold {del_style}")
-        elif _HUNK_RE.match(line):
-            flush_context()
-            output.append(f"{line}\n", style=f"bold {hunk_style}")
+            # Addition — green gutter bar, background via CSS
+            yield Static(
+                Content.assemble(
+                    (f"{glyphs.gutter_bar}", f"{colors.success} bold"),
+                    (f"{new_num:>{width}}", "dim"),
+                    f" {content}",
+                ),
+                classes="diff-line-added",
+            )
+            new_num += 1
+            line_count += 1
+        elif line.startswith(" "):
+            # Context line — dim gutter
+            yield Static(
+                Content.assemble(
+                    (f"{glyphs.box_vertical}{old_num:>{width}}", "dim"),
+                    f" {content}",
+                ),
+            )
+            old_num += 1
+            new_num += 1
+            line_count += 1
+        elif line.strip() == "...":
+            # Truncation marker
+            yield Static(Content.styled("...", "dim"))
+            line_count += 1
         else:
-            context_buf.append(line)
+            # Unrecognized diff line (e.g., "\ No newline at end of file")
+            yield Static(Content.styled(line, "dim"))
+            line_count += 1
 
-        count += 1
 
+class EnhancedDiff(Vertical):
+    """Widget for displaying a unified diff with syntax highlighting."""
 
-    flush_context()
-    return output
+    DEFAULT_CSS = """
+    EnhancedDiff {
+        height: auto;
+        padding: 1;
+        background: $surface;
+        border: round $primary;
+    }
+
+    EnhancedDiff .diff-title {
+        color: $primary;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    EnhancedDiff .diff-content {
+        height: auto;
+    }
+
+    EnhancedDiff .diff-stats {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        diff: str,
+        title: str = "Diff",
+        max_lines: int | None = 100,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the diff widget."""
+        super().__init__(**kwargs)
+        self._diff = diff
+        self._title = title
+        self._max_lines = max_lines
+        self._stats = self._compute_stats()
+
+    def _compute_stats(self) -> tuple[int, int]:
+        """Compute additions and deletions count."""
+        additions = 0
+        deletions = 0
+        for line in self._diff.splitlines():
+            if line.startswith("+") and not line.startswith("+++"):
+                additions += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                deletions += 1
+        return additions, deletions
+
+    def on_mount(self) -> None:
+        """Set border style based on charset mode."""
+        if is_ascii_mode():
+            colors = theme.get_theme_colors(self)
+            self.styles.border = ("ascii", colors.primary)
+
+    def compose(self) -> ComposeResult:
+        """Compose the diff widget layout."""
+        colors = theme.get_theme_colors(self)
+        glyphs = get_glyphs()
+        h = glyphs.box_double_horizontal
+        yield Static(
+            Content.styled(
+                f"{h}{h}{h} {self._title} {h}{h}{h}", f"bold {colors.primary}"
+            ),
+            classes="diff-title",
+        )
+
+        yield from compose_diff_lines(self._diff, self._max_lines)
+
+        additions, deletions = self._stats
+        if additions or deletions:
+            content_parts: list[str | tuple[str, str] | Content] = []
+            if additions:
+                content_parts.append((f"+{additions}", colors.success))
+            if deletions:
+                if content_parts:
+                    content_parts.append(" ")
+                content_parts.append((f"-{deletions}", colors.error))
+            yield Static(Content.assemble(*content_parts), classes="diff-stats")

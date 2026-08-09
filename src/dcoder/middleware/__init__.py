@@ -17,7 +17,7 @@ from dcoder.middleware.glm_stall_recovery import GlmTerminalStallRecoveryMiddlew
 from dcoder.middleware.ask_user import AskUserMiddleware
 from dcoder.middleware.resume_state import ResumeStateMiddleware
 from dcoder.middleware.memory_guard import ManagedMemoryGuardMiddleware
-from dcoder.middleware.compaction import CLICompactionMiddleware
+from dcoder.middleware.compaction import CLICompactionMiddleware, _create_cli_compaction_middleware
 from dcoder.middleware.skills import PluginSkillsMiddleware
 from dcoder.middleware.tool_filter import ToolFilterMiddleware
 from dcoder.middleware.headless_mcp_guard import (
@@ -66,6 +66,7 @@ __all__ = [
     "CostState",
     "ManagedMemoryGuardMiddleware",
     "CLICompactionMiddleware",
+    "_create_cli_compaction_middleware",
     "PluginSkillsMiddleware",
     "ToolFilterMiddleware",
     "HeadlessMCPGuardMiddleware",

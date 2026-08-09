@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence, TYPE_CHECKING, cast
@@ -16,13 +17,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger("dcoder")
 
 
+def _sanitize_agent_message_name(raw: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]", "_", raw)
+    return cleaned if cleaned else "agent"
+
+
+
 @dataclass
 class CLIContextSchema:
     model: str | None = None
     model_params: dict[str, Any] = field(default_factory=dict)
+    profile_overrides: dict[str, Any] = field(default_factory=dict)
+    model_context_limit: int | None = None
+    approval_mode: str = "manual"
     auto_approve: bool = False
     approval_mode_key: str | None = None
     thread_id: str | None = None
+    turn_id: str | None = None
+    offload_tool_call_id: str | None = None
+    hooks_snapshot_id: str | None = None
+    hooks_server_events: list[str] = field(default_factory=list)
+    prompt_id: str | None = None
 
 
 def run_sync(coro):
@@ -86,9 +101,30 @@ def _should_interrupt_tool_call(request: Any, *, auto_mode_enabled: bool = True)
     return True
 
 
+def _format_task_description(tool_call: Any, state: Any = None, runtime: Any = None) -> str:
+    """Format task (subagent) tool call for approval prompt."""
+    args = tool_call.get("args") or {} if isinstance(tool_call, dict) else getattr(tool_call, "args", {}) or {}
+    description = str(args.get("description") or "unknown")
+    subagent_type = str(args.get("subagent_type") or args.get("name") or "unknown")
+
+    description_preview = description
+    if len(description) > 500:
+        description_preview = description[:500] + "..."
+
+    separator = "━" * 40
+    warning_msg = "Subagent will have access to file operations and shell commands"
+    return (
+        f"Subagent Type: {subagent_type}\n\n"
+        f"⚠️ {warning_msg} ⚠️\n\n"
+        f"Task Instructions:\n"
+        f"{separator}\n"
+        f"{description_preview}"
+    )
+
+
 def _format_description(tool_call: Any, state: Any = None, runtime: Any = None) -> str:
-    name = tool_call.get("name")
-    args = tool_call.get("args") or {}
+    name = tool_call.get("name") if isinstance(tool_call, dict) else getattr(tool_call, "name", None)
+    args = tool_call.get("args") or {} if isinstance(tool_call, dict) else getattr(tool_call, "args", {}) or {}
     if name == "execute":
         command = args.get("command", "")
         if "destroy" in command:
@@ -108,15 +144,32 @@ def _format_description(tool_call: Any, state: Any = None, runtime: Any = None) 
         return f"Perform web search: {args.get('query')}"
     elif name == "fetch_url":
         return f"Fetch external URL content: {args.get('url') or args.get('Url')}"
-    elif name in ("task", "start_async_task"):
-        return f"Spawn subagent: {args.get('name') or args.get('TaskName')}"
-    elif name == "update_async_task":
-        return f"Update async subagent: {args.get('task_id')}"
-    elif name == "cancel_async_task":
-        return f"Cancel async subagent: {args.get('task_id')}"
+    elif name == "task":
+        return _format_task_description(tool_call, state, runtime)
+    elif name in ("start_async_task", "update_async_task", "cancel_async_task"):
+        return f"Launch, update, or cancel a remote async subagent: {args.get('name') or args.get('task_id') or ''}"
     elif name == "compact_conversation":
         return f"Compact conversation history"
     return f"Execute tool '{name}' with arguments: {args}"
+
+
+def _get_harness_tool_descriptions(
+    model: str | BaseChatModel,
+) -> dict[str, str]:
+    """Return the SDK harness's tool-description overrides for `model`."""
+    try:
+        from deepagents.profiles.harness.harness_profiles import (
+            _get_harness_profile,
+            _harness_profile_for_model,
+        )
+
+        if isinstance(model, str):
+            profile = _get_harness_profile(model)
+            return dict(profile.tool_description_overrides) if profile is not None else {}
+        return dict(_harness_profile_for_model(model, None).tool_description_overrides)
+    except Exception as exc:
+        logger.debug("Harness profile lookup skipped: %s", exc)
+        return {}
 
 
 def _subagent_cli_middleware(
@@ -141,6 +194,10 @@ def _subagent_cli_middleware(
     from dcoder.config.settings import settings
 
     middleware: list[AgentMiddleware[Any, Any]] = []
+    if interrupt_on is not None:
+        from dcoder.middleware.auto_mode import AsyncApprovalHITLMiddleware
+        middleware.append(AsyncApprovalHITLMiddleware(interrupt_on))
+
     if not has_explicit_model:
         middleware.append(ConfigurableModelMiddleware(persist_model_state=False))
 
@@ -154,10 +211,6 @@ def _subagent_cli_middleware(
     if shell_allow_list:
         from dcoder.middleware.shell_allow_list import ShellAllowListMiddleware
         middleware.append(ShellAllowListMiddleware(shell_allow_list))
-
-    if interrupt_on is not None:
-        from dcoder.middleware.auto_mode import AsyncApprovalHITLMiddleware
-        middleware.append(AsyncApprovalHITLMiddleware(interrupt_on))
 
     from dcoder.middleware.server_hooks import ServerHooksMiddleware
     subagent_cwd = Path(worktree_root) if worktree_root is not None else Path.cwd()
@@ -195,7 +248,20 @@ def _subagent_cli_middleware(
 
 INTERPRETER_PTC_SAFE_PRESET: frozenset[str] = frozenset({"read_file", "glob", "grep"})
 _INTERPRETER_WRITE_TOOLS: frozenset[str] = frozenset(
-    {"execute", "write_file", "edit_file", "delete", "replace_file_content", "multi_replace_file_content", "write_to_file", "write_todos"}
+    {
+        "execute",
+        "write_file",
+        "edit_file",
+        "delete",
+        "replace_file_content",
+        "multi_replace_file_content",
+        "write_to_file",
+        "write_todos",
+        "task",
+        "start_async_task",
+        "update_async_task",
+        "cancel_async_task",
+    }
 )
 
 def _resolve_ptc_option(
@@ -417,6 +483,7 @@ def create_dcoder_agent(
         LocalContextMiddleware,
         PluginSkillsMiddleware,
         CLICompactionMiddleware,
+        _create_cli_compaction_middleware,
         ManagedMemoryGuardMiddleware,
         ReliableRubricMiddleware,
     )
@@ -674,7 +741,9 @@ def create_dcoder_agent(
     )
 
     # Compaction Middleware (after local context and goal criteria)
-    agent_middleware.append(CLICompactionMiddleware(thread_id=thread_id))
+    agent_middleware.append(
+        _create_cli_compaction_middleware(active_model, composite_backend)
+    )
 
     # Reliable Rubric Evaluator Middleware — with grader middleware and context schema
     from dcoder.middleware.goal_criteria import _WebSearchBudgetMiddleware
@@ -703,6 +772,11 @@ def create_dcoder_agent(
     )
 
     # Wire Subagents
+    if async_subagents is None:
+        from dcoder.subagents.loader import load_async_subagents
+
+        async_subagents = load_async_subagents() or None
+
     from dcoder.subagents import list_subagents, get_built_in_subagents
     user_agents_dir = settings.get_user_agents_dir(assistant_id)
     project_agents_dir = settings.get_project_agents_dir()
@@ -722,9 +796,21 @@ def create_dcoder_agent(
         name = meta.get("name")
         if name:
             subagent_by_name[name] = meta
+
+    main_tool_descriptions = _get_harness_tool_descriptions(active_model)
         
+    subagent_interrupt_on = interrupt_on if (interactive and not auto_approve) else None
     compiled_subagents = []
     for name, subagent_meta in subagent_by_name.items():
+        if fs_tools is not None and "runnable" in subagent_meta:
+            msg = (
+                "Cannot enforce --allow-fs-tools on compiled subagent "
+                f"{subagent_meta.get('name', '<unnamed>')!r}: its middleware is "
+                "not configurable, so the filesystem restriction would be "
+                "silently bypassed."
+            )
+            raise ValueError(msg)
+
         model_spec = subagent_meta.get("model")
         subagent_dict: dict[str, Any] = {
             "name": subagent_meta.get("name") or name,
@@ -744,7 +830,7 @@ def create_dcoder_agent(
             allowed_skills=subagent_meta.get("skills"),
             interactive=interactive,
             shell_allow_list=allow_list if not interactive and allow_list else None,
-            interrupt_on=interrupt_on if not auto_approve and interactive else None,
+            interrupt_on=subagent_interrupt_on,
             worktree_root=effective_cwd,
         )
         if subagent_middleware:
@@ -754,7 +840,17 @@ def create_dcoder_agent(
             if "middleware" not in subagent_dict:
                 subagent_dict["middleware"] = []
             
-            kwargs: dict[str, Any] = {"backend": composite_backend, "tools": fs_tools}
+            subagent_tool_descriptions = (
+                _get_harness_tool_descriptions(subagent_dict["model"])
+                if "model" in subagent_dict
+                else main_tool_descriptions
+            )
+
+            kwargs: dict[str, Any] = {
+                "backend": composite_backend,
+                "tools": fs_tools,
+                "custom_tool_descriptions": subagent_tool_descriptions,
+            }
             try:
                 fs_mw = FilesystemMiddleware(**kwargs)
             except TypeError:
@@ -764,10 +860,49 @@ def create_dcoder_agent(
             mw_list = subagent_dict["middleware"]
             if isinstance(mw_list, list):
                 mw_list.append(fs_mw)
-        if not auto_approve:
+        if subagent_interrupt_on is not None:
             subagent_dict["interrupt_on"] = {}
 
         compiled_subagents.append(subagent_dict)
+
+    from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
+
+    if not any(
+        subagent.get("name") == GENERAL_PURPOSE_SUBAGENT["name"]
+        for subagent in compiled_subagents
+    ):
+        gp_middleware = _subagent_cli_middleware(
+            has_explicit_model=False,
+            assistant_id=assistant_id,
+            subagent_name=GENERAL_PURPOSE_SUBAGENT["name"],
+            interactive=interactive,
+            interrupt_on=subagent_interrupt_on,
+            worktree_root=effective_cwd,
+        )
+        if fs_tools is not None:
+            from deepagents.middleware import FilesystemMiddleware
+            kwargs: dict[str, Any] = {
+                "backend": composite_backend,
+                "tools": fs_tools,
+                "custom_tool_descriptions": main_tool_descriptions,
+            }
+            try:
+                fs_mw = FilesystemMiddleware(**kwargs)
+            except TypeError:
+                fs_mw = FilesystemMiddleware(backend=composite_backend)
+                fs_mw.tools = [t for t in fs_mw.tools if getattr(t, "name", "") in fs_tools]
+            gp_middleware.append(fs_mw)
+
+        gp_subagent: dict[str, Any] = {
+            "name": GENERAL_PURPOSE_SUBAGENT["name"],
+            "description": GENERAL_PURPOSE_SUBAGENT["description"],
+            "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
+            "middleware": gp_middleware,
+        }
+        if subagent_interrupt_on is not None:
+            gp_subagent["interrupt_on"] = {}
+
+        compiled_subagents.append(gp_subagent)
 
     # 7. System prompt is handled via HarnessProfile (base_system_prompt)
     resolved_system_prompt = None
@@ -788,11 +923,14 @@ def create_dcoder_agent(
         tools=tools_list,
         backend=composite_backend,
         middleware=agent_middleware,
-        interrupt_on=interrupt_on,
+        interrupt_on=None,
         context_schema=CLIContextSchema,
         checkpointer=checkpointer,
         subagents=all_subagents or None,
-        name=assistant_id,
+        name=_sanitize_agent_message_name(assistant_id),
     )
-
     return agent, composite_backend
+
+
+create_cli_agent = create_dcoder_agent
+

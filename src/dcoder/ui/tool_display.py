@@ -30,7 +30,7 @@ _CUSTOM_DISPLAY_NAMES: dict[str, str] = {
     "glob": "Glob",
     "web_search": "Search",
     "fetch_url": "Fetch",
-    "task": "Task",
+    "task": "task",
     "ask_user": "Ask",
 }
 
@@ -123,11 +123,7 @@ def format_tool_display(
 
     # 1. Dedicated formatters for core agent tools
     if raw_name in {"task"}:
-        sub_name = args.get("subagent_type") or args.get("agent_name") or "subagent"
-        desc = args.get("description") or args.get("prompt")
-        if desc:
-            d_str = truncate_value(str(desc), max_length=40)
-            return f"{prefix} {display_name} [{sub_name}]: {d_str}"
+        sub_name = args.get("subagent_type") or args.get("agent_name") or args.get("subagent") or "subagent"
         return f"{prefix} {display_name} [{sub_name}]"
 
     elif raw_name == "ask_user":

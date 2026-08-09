@@ -72,6 +72,24 @@ COMMANDS: tuple[SlashCommand, ...] = (
         hidden_keywords="switch profile persona subagents",
     ),
     SlashCommand(
+        name="/auto",
+        description="Switch to Auto approval mode",
+        bypass_tier=BypassTier.SIDE_EFFECT_FREE,
+        hidden_keywords="approval mode classifier automatic auto-approve shift+tab",
+    ),
+    SlashCommand(
+        name="/manual",
+        description="Switch to Manual approval mode",
+        bypass_tier=BypassTier.SIDE_EFFECT_FREE,
+        hidden_keywords="approval mode approve prompt review shift+tab",
+    ),
+    SlashCommand(
+        name="/yolo",
+        description="Switch to YOLO approval mode (no review)",
+        bypass_tier=BypassTier.SIDE_EFFECT_FREE,
+        hidden_keywords="approval mode unrestricted auto-approve dangerous shift+tab",
+    ),
+    SlashCommand(
         name="/bug",
         description="Report a bug or provide feedback",
         bypass_tier=BypassTier.QUEUED,
@@ -418,13 +436,27 @@ def get_command(name_or_alias: str) -> SlashCommand | None:
     return None
 
 
+_STATIC_SKILL_ALIASES: frozenset[str] = frozenset({"remember", "skill-creator"})
+"""Built-in skill names that have a dedicated top-level slash command."""
+
+
 def build_skill_commands(skills: list[Any]) -> list[SlashCommand]:
-    """Dynamically generate SlashCommands from discovered skills."""
+    """Dynamically generate SlashCommands from discovered skills.
+
+    Skills that already have a dedicated slash command in `COMMANDS`
+    (e.g., `remember` → `/remember`) are excluded to avoid duplicate
+    autocomplete entries.
+    """
     skill_cmds: list[SlashCommand] = []
     for skill in skills:
-        name = getattr(skill, "name", "")
-        desc = getattr(skill, "description", "")
-        if name:
+        if isinstance(skill, dict):
+            name = skill.get("name", "")
+            desc = skill.get("description", "")
+        else:
+            name = getattr(skill, "name", "")
+            desc = getattr(skill, "description", "")
+
+        if name and name.lower() not in _STATIC_SKILL_ALIASES:
             cmd_name = f"/{name.lower().replace('_', '-')}"
             skill_cmds.append(
                 SlashCommand(

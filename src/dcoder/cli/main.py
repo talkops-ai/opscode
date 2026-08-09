@@ -13,7 +13,34 @@ import os
 import sys
 from typing import Any
 
+from dcoder.approval_mode import ApprovalMode, coerce_approval_mode
+
 logger = logging.getLogger(__name__)
+
+
+# ── Argument Types ───────────────────────────────────────
+
+
+def positive_int(value: str) -> int:
+    """Validate positive integer arguments (> 0)."""
+    try:
+        ivalue = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a valid integer") from exc
+    if ivalue <= 0:
+        raise argparse.ArgumentTypeError(f"{value!r} must be greater than 0")
+    return ivalue
+
+
+def non_negative_int(value: str) -> int:
+    """Validate non-negative integer arguments (>= 0)."""
+    try:
+        ivalue = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a valid integer") from exc
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError(f"{value!r} must be non-negative")
+    return ivalue
 
 
 # ── Version ──────────────────────────────────────────────
@@ -57,11 +84,23 @@ def _apply_stdin_pipe(args: argparse.Namespace) -> None:
             args.non_interactive_message = piped
 
 
+# ── Approval Mode Resolution ─────────────────────────────
+
+
+def _resolve_approval_mode(args: argparse.Namespace) -> ApprovalMode:
+    """Resolve explicit flags into a typed ApprovalMode."""
+    if getattr(args, "yolo", False):
+        return ApprovalMode.YOLO
+    if getattr(args, "auto_approve", None) is True:
+        return ApprovalMode.AUTO
+    return ApprovalMode.MANUAL
+
+
 # ── Argument parser ──────────────────────────────────────
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments.
+    """Parse command line arguments matching standard CLI options schema.
 
     Returns:
         Parsed arguments namespace.
@@ -72,47 +111,12 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # === Mode selection ===
+    # === Positionals & Prompts ===
     parser.add_argument(
         "prompt",
         nargs="?",
         default=None,
         help="Non-interactive prompt (alternative to -n)",
-    )
-    parser.add_argument(
-        "-n",
-        "--non-interactive",
-        dest="non_interactive_message",
-        metavar="MSG",
-        default=None,
-        help="Run in non-interactive mode with the given prompt",
-    )
-
-    # === Model ===
-    parser.add_argument("-m", "--model", default=None, help="LLM model (provider:name)")
-    parser.add_argument(
-        "--model-params", default=None, help="JSON string of model parameters"
-    )
-
-    # === Agent ===
-    parser.add_argument(
-        "-a",
-        "--agent",
-        default=None,
-        help="Agent identity (default: dcoder)",
-    )
-
-    # === Shell & Approval ===
-    parser.add_argument(
-        "--auto-approve",
-        action="store_true",
-        default=False,
-        help="Approve all tool calls automatically",
-    )
-    parser.add_argument(
-        "--shell-allow-list",
-        default=None,
-        help="Comma-separated allowed shell commands (or 'all'/'recommended')",
     )
 
     # === Thread management ===
@@ -120,67 +124,246 @@ def parse_args() -> argparse.Namespace:
         "-r",
         "--resume",
         dest="resume_thread",
+        nargs="?",
+        const="__MOST_RECENT__",
         default=None,
-        help="Resume a specific thread by ID",
+        metavar="ID",
+        help="Resume thread: -r for most recent, -r <ID> for specific thread",
     )
 
-    # === Non-interactive options ===
+    # === Agent ===
+    parser.add_argument(
+        "-a",
+        "--agent",
+        default=None,
+        metavar="NAME",
+        help="Agent to use (default: dcoder)",
+    )
+
+    # === Model & Execution Profile ===
+    parser.add_argument(
+        "-M",
+        "--model",
+        dest="model",
+        metavar="MODEL",
+        help="Model specifier (e.g. claude-opus-4-7, gpt-5.5)",
+    )
+    parser.add_argument(
+        "--model-params",
+        metavar="JSON",
+        help="Extra kwargs to pass to model as JSON string",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=non_negative_int,
+        default=None,
+        metavar="N",
+        help="Override max retries for transient model errors",
+    )
+    parser.add_argument(
+        "--profile-override",
+        metavar="JSON",
+        help="Override model profile fields as JSON string",
+    )
+    parser.add_argument(
+        "--default-model",
+        metavar="MODEL",
+        nargs="?",
+        const="__SHOW__",
+        default=None,
+        help="Set or show current default model for future launches",
+    )
+    parser.add_argument(
+        "--clear-default-model",
+        action="store_true",
+        help="Clear configured default model",
+    )
+
+    # === Startup Prompts & Commands ===
+    parser.add_argument(
+        "-m",
+        "--message",
+        "--initial-prompt",
+        dest="initial_prompt",
+        metavar="TEXT",
+        help="Initial prompt to auto-submit when session starts",
+    )
+    parser.add_argument(
+        "-s",
+        "--skill",
+        dest="initial_skill",
+        metavar="NAME",
+        help="Invoke a skill when interactive session starts",
+    )
+    parser.add_argument(
+        "--startup-cmd",
+        dest="startup_cmd",
+        metavar="CMD",
+        help="Shell command executed at startup before first prompt",
+    )
+
+    # === Non-interactive Mode & Limits ===
+    parser.add_argument(
+        "-n",
+        "--non-interactive",
+        dest="non_interactive_message",
+        metavar="TEXT",
+        help="Run a single task non-interactively and exit",
+    )
     parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
         default=False,
-        help="Suppress diagnostics (non-interactive only)",
+        help="Clean output for piping stdout (requires -n or piped stdin)",
     )
     parser.add_argument(
         "--no-stream",
         action="store_true",
         default=False,
-        help="Buffer full response (non-interactive only)",
+        help="Buffer full response before writing (requires -n or piped stdin)",
     )
     parser.add_argument(
         "--max-turns",
-        type=int,
+        type=positive_int,
         default=None,
-        help="Maximum agent turns (non-interactive only)",
+        metavar="N",
+        help="Maximum agentic turns before stopping",
     )
     parser.add_argument(
         "--timeout",
-        type=float,
+        type=positive_int,
         default=None,
-        help="Timeout in seconds (non-interactive only)",
+        metavar="SECONDS",
+        help="Hard wall-clock timeout in seconds",
     )
 
-    # === Rubric (non-interactive) ===
-    parser.add_argument("--rubric", default=None, help="Acceptance criteria text")
-    parser.add_argument("--rubric-model", default=None, help="Model for rubric grading")
+    # === Goal & Rubric Evaluation ===
+    parser.add_argument(
+        "--goal",
+        metavar="TEXT",
+        help="Goal objective to generate acceptance criteria in interactive mode",
+    )
+    parser.add_argument(
+        "--rubric",
+        metavar="TEXT|@PATH",
+        help="Acceptance criteria text or '@path' for self-evaluation loop",
+    )
+    parser.add_argument(
+        "--rubric-model",
+        metavar="MODEL",
+        help="Grader model for rubric self-evaluation",
+    )
     parser.add_argument(
         "--rubric-max-iterations",
-        type=int,
+        type=positive_int,
         default=None,
-        help="Max rubric grading iterations",
+        metavar="N",
+        help="Max grader iterations per rubric attempt",
     )
-
-    # === Goal (interactive) ===
     parser.add_argument(
-        "--goal", default=None, help="Set goal with acceptance criteria"
+        "--recursion-limit",
+        type=positive_int,
+        default=None,
+        metavar="N",
+        help="Override main agent's recursion_limit (defaults to 2000)",
     )
 
-    # === MCP ===
+    # === Approval Modes ===
+    approval_group = parser.add_mutually_exclusive_group()
+    approval_group.add_argument(
+        "-y",
+        "--auto-approve",
+        action="store_true",
+        default=False,
+        help="Interactive TUI mode: enable classifier-backed Auto mode.",
+    )
+    approval_group.add_argument(
+        "--yolo",
+        action="store_true",
+        default=False,
+        help="Interactive mode: run gated actions without review after acknowledgement.",
+    )
+
+    # === Shell & Sandbox ===
+    parser.add_argument(
+        "-S",
+        "--shell-allow-list",
+        metavar="LIST",
+        help="Comma-separated list of allowed shell commands ('recommended', 'all', or list)",
+    )
+    parser.add_argument(
+        "--sandbox",
+        nargs="?",
+        const="__DEFAULT__",
+        default="none",
+        metavar="TYPE",
+        help="Remote sandbox for code execution (default: none)",
+    )
+    parser.add_argument(
+        "--sandbox-id",
+        metavar="ID",
+        help="Existing remote sandbox ID to attach to",
+    )
+    parser.add_argument(
+        "--sandbox-snapshot-name",
+        metavar="NAME",
+        help="Snapshot or blueprint name to create or attach",
+    )
+    parser.add_argument(
+        "--sandbox-setup",
+        metavar="PATH",
+        help="Path to setup shell script to run after sandbox creation",
+    )
+
+    # === Interpreter & Tools ===
+    parser.add_argument(
+        "--interpreter",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Toggle JS interpreter (`js_eval`) middleware",
+    )
+    parser.add_argument(
+        "--interpreter-tools",
+        metavar="VALUE",
+        help="PTC allowlist for `js_eval`: 'safe', 'all', or comma-separated list",
+    )
+    parser.add_argument(
+        "--allow-fs-tools",
+        metavar="LIST",
+        default="all",
+        help="Allowlist of filesystem tools ('all' or comma-separated list)",
+    )
+
+    # === MCP & Security ===
+    parser.add_argument(
+        "--mcp-config",
+        metavar="PATH",
+        help="Path to explicit MCP JSON configuration file",
+    )
     parser.add_argument(
         "--no-mcp",
         action="store_true",
         default=False,
-        help="Disable all MCP servers",
-    )
-    parser.add_argument(
-        "--mcp-config", default=None, help="Path to MCP config file"
+        help="Disable all MCP tool loading",
     )
     parser.add_argument(
         "--trust-project-mcp",
         action="store_true",
         default=False,
-        help="Auto-trust project-level MCP servers",
+        help="Skip interactive approval prompt for project-level MCP configs",
+    )
+    parser.add_argument(
+        "--trust-project-hooks",
+        action="store_true",
+        default=False,
+        help="Trust project-level `.dcoder/hooks.json` command handlers",
+    )
+    parser.add_argument(
+        "--acp",
+        action="store_true",
+        default=False,
+        help="Run as an ACP server over stdio instead of launching Textual UI",
     )
 
     # === Meta ===
@@ -281,7 +464,6 @@ def _validate_args(args: argparse.Namespace) -> None:
 
 def cli_main() -> None:
     """Main CLI entry point for the ``dcoder`` console script."""
-    # Fast path: print version without loading heavy deps
     if len(sys.argv) == 2 and sys.argv[1] in {"-v", "--version"}:  # noqa: PLR2004
         print(build_version_text())  # noqa: T201
         sys.exit(0)
@@ -323,8 +505,9 @@ def cli_main() -> None:
             from dcoder._debug import configure_debug_logging
             configure_debug_logging(logging.getLogger("dcoder"))
 
-        # Resolve agent identity
+        # Resolve agent identity & approval mode
         assistant_id = args.agent or "dcoder"
+        approval_mode = _resolve_approval_mode(args)
 
         # Parse shell allow list
         shell_allow_list: list[str] | None = None
@@ -343,7 +526,7 @@ def cli_main() -> None:
                     model=args.model,
                     model_params=model_params,
                     assistant_id=assistant_id,
-                    auto_approve=args.auto_approve,
+                    auto_approve=approval_mode != ApprovalMode.MANUAL,
                     shell_allow_list=shell_allow_list,
                     quiet=args.quiet,
                     no_stream=args.no_stream,
@@ -366,7 +549,7 @@ def cli_main() -> None:
             model=args.model,
             model_params=model_params,
             assistant_id=assistant_id,
-            auto_approve=args.auto_approve,
+            auto_approve=approval_mode != ApprovalMode.MANUAL,
             resume_thread=args.resume_thread,
             goal=args.goal,
             shell_allow_list=shell_allow_list,

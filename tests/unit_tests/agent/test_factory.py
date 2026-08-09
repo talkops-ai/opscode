@@ -104,3 +104,51 @@ class TestResolvePtcOption:
     def test_resolve_ptc_list_blocks_unsafe_without_ack(self):
         with pytest.raises(ValueError, match="HITL approval"):
             _resolve_ptc_option(["execute"], tools=[], acknowledge_unsafe=False, auto_approve=False)
+
+    def test_resolve_ptc_blocks_task_without_ack(self):
+        from dcoder.agent.factory import _INTERPRETER_WRITE_TOOLS
+        assert "task" in _INTERPRETER_WRITE_TOOLS
+        assert "start_async_task" in _INTERPRETER_WRITE_TOOLS
+        assert "update_async_task" in _INTERPRETER_WRITE_TOOLS
+        assert "cancel_async_task" in _INTERPRETER_WRITE_TOOLS
+
+        with pytest.raises(ValueError, match="HITL approval"):
+            _resolve_ptc_option(["task"], tools=[], acknowledge_unsafe=False, auto_approve=False)
+
+
+def test_format_task_description_formatting():
+    from dcoder.agent.factory import _format_description
+
+    tool_call = {
+        "name": "task",
+        "args": {
+            "subagent_type": "researcher",
+            "description": "Investigate cluster health and report metrics.",
+        },
+    }
+
+    formatted = _format_description(tool_call)
+    assert "Subagent Type: researcher" in formatted
+    assert "⚠️ Subagent will have access to file operations and shell commands ⚠️" in formatted
+    assert "Task Instructions:" in formatted
+    assert "Investigate cluster health and report metrics." in formatted
+
+
+def test_format_task_description_truncation():
+    from dcoder.agent.factory import _format_description
+
+    long_instructions = "x" * 600
+    tool_call = {
+        "name": "task",
+        "args": {
+            "subagent_type": "k8s-auditor",
+            "description": long_instructions,
+        },
+    }
+
+    formatted = _format_description(tool_call)
+    assert "Subagent Type: k8s-auditor" in formatted
+    assert "x" * 500 in formatted
+    assert "..." in formatted
+    assert len(formatted) < len(long_instructions) + 200
+

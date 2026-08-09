@@ -48,6 +48,7 @@ from textual.message import Message
 from textual.theme import Theme
 from textual.worker import Worker
 
+from dcoder.approval_mode import ApprovalMode
 from dcoder.ui.approval import (
     ApprovalDecided,
     ApprovalMenu,
@@ -181,6 +182,19 @@ class DCoderApp(App):
         Binding("ctrl+l", "clear_chat", "Clear", show=False),
         Binding("shift+tab", "toggle_auto_approve", "Auto-approve", show=False),
         Binding("ctrl+\\", "toggle_debug_console", "Debug", show=False),
+        # Approval menu keys (handled at App level for reliability)
+        Binding("up", "approval_up", "Up", show=False),
+        Binding("k", "approval_up", "Up", show=False),
+        Binding("down", "approval_down", "Down", show=False),
+        Binding("j", "approval_down", "Down", show=False),
+        Binding("enter", "approval_select", "Select", show=False),
+        Binding("y", "approval_yes", "Yes", show=False),
+        Binding("1", "approval_position(0)", "Select first", show=False),
+        Binding("2", "approval_position(1)", "Select second", show=False),
+        Binding("3", "approval_position(2)", "Select third", show=False),
+        Binding("a", "approval_auto", "Auto", show=False),
+        Binding("n", "approval_no", "No", show=False),
+        Binding("escape", "approval_escape", "Esc", show=False),
     ]
 
     # ── App-level Lifecycle Messages ─────────────────────
@@ -251,6 +265,7 @@ class DCoderApp(App):
         self._git_branch_refresh_task: asyncio.Task[None] | None = None
         self._session_cost_usd: float = 0.0
         self._context_tokens: int = 0
+        self._cumulative_session_tokens: int = 0
 
         # ── State Flags ──────────────────────────────────
         self._agent_running = False
@@ -269,6 +284,7 @@ class DCoderApp(App):
         self._agent_reconciling = False
         self._pending_goal_review_widget: Any | None = None
         self._pending_goal_review_future: Any | None = None
+        self._pending_approval_widget: Any | None = None
 
         # ── Worker Handles ───────────────────────────────
         self._agent_worker: Worker[None] | None = None
@@ -340,8 +356,10 @@ class DCoderApp(App):
 
     def compose(self) -> ComposeResult:
         from dcoder.ui.goal_status import GoalStatusPanel
+        from dcoder.ui.subagent_panel import SubagentPanel
         yield MessageList(id="messages")
         with Container(id="bottom-container"):
+            yield SubagentPanel(id="subagent-panel")
             yield GoalStatusPanel(id="goal-status-panel")
             yield ChatInput(id="input-area")
         yield StatusBar(cwd=self._cwd, id="status-bar")
@@ -373,6 +391,7 @@ class DCoderApp(App):
             status_bar=status_bar,
             auto_approve=self._auto_approve,
             set_spinner=self._set_spinner,
+            on_subagent_event=self._on_subagent_event,
             app=self,
         )
 
@@ -803,6 +822,13 @@ class DCoderApp(App):
         await self._mount_message(UserMessage(message))
         await self._send_to_agent(message)
 
+    async def send_agent_message(self, message: str, **kwargs: Any) -> None:
+        """Send a message to the agent and start execution.
+
+        Public interface for skill invocation and command handlers.
+        """
+        await self._send_to_agent(message)
+
     async def _send_to_agent(self, message: str) -> None:
         """Send a message to the agent and start execution.
 
@@ -989,14 +1015,18 @@ class DCoderApp(App):
     async def _aupdate_thread_state(self, update: dict[str, Any]) -> None:
         """Write one state update through the graph client.
 
-        Reference: app.py L11142-L11154.  DCoder always uses a RemoteGraph
-        via the adapter's client, so this maps to the ``aupdate_state`` call
-        used in the reference's remote path.
+        Reference: deepagents_code/app.py L11142-L11154.
         """
         if not self._adapter or not self._adapter.connected or not self._agent_thread_id:
             return
         config: dict[str, Any] = {"configurable": {"thread_id": self._agent_thread_id}}
-        await self._adapter._client.aupdate_state(config, update, as_node="model")
+        client = self._adapter._client
+
+        if hasattr(client, "aensure_thread"):
+            await client.aensure_thread(config)
+            await client.aupdate_state(config, update, as_node="model")
+        else:
+            await client.aupdate_state(config, update)
 
     def _goal_state_update(self) -> dict[str, Any]:
         """Build checkpoint state for goal/rubric metadata managed by the TUI.
@@ -1042,7 +1072,12 @@ class DCoderApp(App):
             return True
         update = dict(state_update or self._goal_state_update())
         if notice is not None:
-            update["messages"] = [notice]
+            if hasattr(notice, "content") and hasattr(notice, "type"):
+                update["messages"] = [{"role": getattr(notice, "type", "system"), "content": str(notice.content)}]
+            elif isinstance(notice, dict):
+                update["messages"] = [notice]
+            else:
+                update["messages"] = [str(notice)]
         try:
             await self._aupdate_thread_state(update)
         except Exception:
@@ -1731,6 +1766,10 @@ class DCoderApp(App):
                 # Open interactive picker
                 await self._show_agent_selector()
 
+        elif cmd_name in {"/manual", "/auto", "/yolo"}:
+            target_mode = ApprovalMode(cmd_name.lstrip("/"))
+            await self._set_approval_mode(target_mode)
+
         elif cmd_name == "/goal":
             if arg:
                 self._goal = arg
@@ -2246,6 +2285,26 @@ class DCoderApp(App):
         except Exception:
             return None
 
+    async def _has_conversation_messages(self) -> bool:
+        """Check if the active session has conversation messages (matches reference dcode)."""
+        try:
+            from dcoder.ui.messages import UserMessage, AssistantMessage, MessageList
+            container = self.query_one("#messages", MessageList)
+            for child in container.children:
+                if isinstance(child, (UserMessage, AssistantMessage)):
+                    return True
+        except Exception:
+            pass
+
+        try:
+            msgs = self.get_thread_messages()
+            if msgs:
+                return True
+        except Exception:
+            pass
+
+        return False
+
     async def get_conversation_token_count(self) -> int | None:
         """Get approximate token count of conversation message history."""
         return await self._get_conversation_token_count()
@@ -2356,6 +2415,7 @@ class DCoderApp(App):
 
         self._session_cost_usd = max(0.0, cost_usd)
         self._context_tokens = max(0, context_tokens)
+        self._cumulative_session_tokens = max(0, context_tokens)
         if self._adapter:
             self._adapter._stats = SessionStats()
             if cost_usd > 0:
@@ -2462,10 +2522,14 @@ class DCoderApp(App):
         pass
 
     @on(TextualAdapter.InterruptRaised)
-    def _on_interrupt_raised(self, event: TextualAdapter.InterruptRaised) -> None:
+    async def _on_interrupt_raised(self, event: TextualAdapter.InterruptRaised) -> None:
         if self._auto_approve and self._adapter:
             self._adapter.submit_approval(event.call_id, True)
             return
+
+        if self._pending_approval_widget is not None:
+            while self._pending_approval_widget is not None:
+                await asyncio.sleep(0.05)
 
         risk = assess_tool_risk(event.tool_name, event.args)
 
@@ -2490,21 +2554,32 @@ class DCoderApp(App):
                     risk=risk,
                     auto_mode_eligible=not getattr(self, "_sandbox_active", False),
                 )
+                self._pending_approval_widget = menu
                 messages.mount_inline_prompt(menu)
+                self.call_after_refresh(menu.scroll_visible)
+                self.call_after_refresh(menu.focus)
             except NoMatches:
                 pass
 
     @on(ApprovalMenu.Decided)
-    def _on_approval_menu_decided(self, event: ApprovalMenu.Decided) -> None:
+    async def _on_approval_menu_decided(self, event: ApprovalMenu.Decided) -> None:
+        if self._pending_approval_widget is not None:
+            try:
+                await self._pending_approval_widget.remove()
+            except Exception:
+                pass
+            self._pending_approval_widget = None
+        elif isinstance(event.control, ApprovalMenu):
+            try:
+                await event.control.remove()
+            except Exception:
+                pass
+
         decision = event.decision
         dec_type = decision.get("type")
 
         if dec_type == "auto_approve_all":
-            self._auto_approve = True
-            self._approval_mode = "auto"
-            self.notify("Enabled Auto for this thread.", severity="information", timeout=3)
-            if self._adapter:
-                self._adapter._auto_approve = True
+            await self._set_approval_mode(ApprovalMode.AUTO)
 
         if self._adapter and event.call_id:
             self._adapter.submit_approval(event.call_id, event.approved)
@@ -2516,8 +2591,55 @@ class DCoderApp(App):
                 comment=event.comment,
             )
 
-        if self._chat_input:
-            self.call_after_refresh(self._chat_input.focus)
+        self._focus_chat_input_after_refresh()
+
+    def _is_input_focused(self) -> bool:
+        if not hasattr(self, "_chat_input") or not self._chat_input:
+            return False
+        focused = self.focused
+        if focused is None:
+            return False
+        return focused.id == "chat-input" or focused in self._chat_input.walk_children()
+
+    def action_approval_up(self) -> None:
+        widget = self._pending_approval_widget
+        if widget is not None and not self._is_input_focused():
+            widget.action_move_up()
+
+    def action_approval_down(self) -> None:
+        widget = self._pending_approval_widget
+        if widget is not None and not self._is_input_focused():
+            widget.action_move_down()
+
+    def action_approval_select(self) -> None:
+        widget = self._pending_approval_widget
+        if widget is not None and not self._is_input_focused():
+            widget.action_select()
+
+    def action_approval_yes(self) -> None:
+        widget = self._pending_approval_widget
+        if widget is not None:
+            widget.action_select_approve()
+
+    def action_approval_position(self, position: int) -> None:
+        widget = self._pending_approval_widget
+        if widget is not None:
+            widget.action_select_position(position)
+
+    def action_approval_auto(self) -> None:
+        widget = self._pending_approval_widget
+        if widget is not None:
+            widget.action_select_auto()
+
+    def action_approval_no(self) -> None:
+        widget = self._pending_approval_widget
+        if widget is not None:
+            widget.action_select_reject()
+
+    def action_approval_escape(self) -> None:
+        widget = self._pending_approval_widget
+        if widget is not None:
+            widget.action_select_reject()
 
     @on(ApprovalDecided)
     def _on_approval_decided(self, event: ApprovalDecided) -> None:
@@ -2532,38 +2654,48 @@ class DCoderApp(App):
         if self._chat_input:
             self.call_after_refresh(self._chat_input.focus)
 
+    def _get_subagent_panel(self) -> SubagentPanel | None:
+        """Return the subagent fan-out panel, or None if not yet mounted."""
+        try:
+            return self.query_one("#subagent-panel", SubagentPanel)
+        except Exception:
+            return None
+
+    def _on_subagent_event(self, event: dict[str, Any]) -> None:
+        """Forward a validated subagent custom-stream event to the panel."""
+        panel = self._get_subagent_panel()
+        if panel is not None:
+            panel.on_subagent_event(event)
+
+    def action_toggle_subagent_panel(self) -> None:
+        """Expand or collapse the subagent fan-out panel."""
+        panel = self._get_subagent_panel()
+        if panel is not None:
+            panel.toggle()
+
     @on(TextualAdapter.SubagentSpawned)
     def _on_subagent_spawned(self, event: TextualAdapter.SubagentSpawned) -> None:
-        try:
-            messages = self.query_one("#messages", MessageList)
-            panels = list(messages.query(SubagentPanel))
-            if not panels:
-                panel = SubagentPanel()
-                messages.mount(panel)
-            else:
-                panel = panels[0]
+        panel = self._get_subagent_panel()
+        if panel is not None:
             panel.spawn_subagent(event.agent_name, event.task)
-        except NoMatches:
-            pass
 
     @on(TextualAdapter.SubagentUpdate)
     def _on_subagent_update(self, event: TextualAdapter.SubagentUpdate) -> None:
-        try:
-            messages = self.query_one("#messages", MessageList)
-            panels = list(messages.query(SubagentPanel))
-            if panels:
-                panels[0].append_token(event.agent_name, event.token)
-        except NoMatches:
-            pass
+        panel = self._get_subagent_panel()
+        if panel is not None:
+            panel.append_token(event.agent_name, event.token)
 
     @on(TextualAdapter.StreamFinished)
     async def _on_stream_finished(self, event: TextualAdapter.StreamFinished) -> None:
+        panel = self._get_subagent_panel()
+        if panel is not None:
+            panel.finalize_running()
         try:
             status_bar = self.query_one("#status-bar", StatusBar)
-            total_tokens = event.stats.input_tokens + event.stats.output_tokens
-            if total_tokens > 0:
-                self._context_tokens = total_tokens
-                status_bar.set_tokens(total_tokens)
+            cumulative_tokens = max(self._cumulative_session_tokens, self._context_tokens)
+            if cumulative_tokens > 0:
+                self._context_tokens = cumulative_tokens
+                status_bar.set_tokens(cumulative_tokens)
             cost_to_display = max(event.stats.total_cost_usd, self._session_cost_usd)
             if cost_to_display > 0:
                 self._session_cost_usd = cost_to_display
@@ -2608,13 +2740,106 @@ class DCoderApp(App):
         except NoMatches:
             pass
 
-    def action_toggle_auto_approve(self) -> None:
-        """Toggle auto-approve mode (Shift+Tab) - Disabled."""
-        self._auto_approve = False
-        self._approval_mode = "suggest"
-        self.notify("Auto-mode is currently disabled.", severity="warning", timeout=3)
+    async def action_toggle_auto_approve(self) -> None:
+        """Cycle approval mode on Shift+Tab (Manual -> Auto -> YOLO -> Manual)."""
+        from dcoder.approval_mode import (
+            ApprovalMode,
+            has_yolo_acknowledgement,
+            next_approval_mode,
+        )
+
+        auto_eligible = not getattr(self, "_sandbox_active", False)
+        target = next_approval_mode(
+            getattr(self, "_approval_mode", "manual"),
+            auto_eligible=auto_eligible,
+            yolo_switcher_enabled=True,
+        )
+        if target is None:
+            self.notify("Approval mode cycling is unavailable.", severity="warning", timeout=3)
+            return
+
+        if target is ApprovalMode.YOLO and not has_yolo_acknowledgement():
+            self._prompt_yolo_switcher_acknowledgement()
+            return
+
+        await self._set_approval_mode(target)
+
+    async def _write_live_approval_mode(self, mode: ApprovalMode | None = None) -> bool:
+        """Persist approval mode to the remote Store for the active session thread."""
+        agent_obj = getattr(self, "_agent", None)
+        thread_id = getattr(self, "_agent_thread_id", None)
+        if agent_obj is None or thread_id is None:
+            return False
+        from dcoder.approval_mode import awrite_approval_mode
+
+        target = mode or getattr(self, "_approval_mode", ApprovalMode.MANUAL)
+        try:
+            live_key = await awrite_approval_mode(
+                agent_obj,
+                thread_id,
+                mode=target,
+            )
+            return live_key is not None
+        except Exception:
+            logger.warning("Failed to write live approval-mode state to store", exc_info=True)
+            return False
+
+    async def _set_approval_mode(self, target: ApprovalMode) -> bool:
+        from dcoder.approval_mode import ApprovalMode
+
+        should_persist = (
+            getattr(self, "_agent", None) is not None
+            and getattr(self, "_agent_thread_id", None) is not None
+        )
+        if should_persist and not await self._write_live_approval_mode(target):
+            if target is ApprovalMode.AUTO:
+                self.notify("Auto could not be persisted; remaining in Manual.", severity="warning")
+                return False
+            if target is ApprovalMode.YOLO:
+                self.notify("YOLO could not be persisted; remaining in previous mode.", severity="warning")
+                return False
+
+        self._approval_mode = target
+        self._auto_approve = (target is ApprovalMode.YOLO)
+        self._update_auto_mode_status_bar(target.value)
+
         if self._adapter:
-            self._adapter._auto_approve = False
+            self._adapter._auto_approve = self._auto_approve
+
+        if target is ApprovalMode.AUTO:
+            self.notify("Switched to Auto mode.", severity="information", timeout=3)
+            self._notify_auto_mode_enabled_once()
+        elif target is ApprovalMode.YOLO:
+            self.notify("⚠️ YOLO mode active: unrestricted execution.", severity="warning", timeout=5)
+        elif target is ApprovalMode.MANUAL:
+            self.notify("Switched to Manual approval mode.", severity="information", timeout=3)
+        return True
+
+    def _prompt_yolo_switcher_acknowledgement(self) -> None:
+        from dcoder.approval_mode import save_yolo_acknowledgement
+        save_yolo_acknowledgement()
+        asyncio.create_task(self._set_approval_mode(ApprovalMode.YOLO))
+
+    def _notify_auto_mode_enabled_once(self) -> None:
+        from dcoder.approval_mode import ApprovalMode, has_auto_mode_notice, save_auto_mode_notice
+        from dcoder.ui.auto_mode_notice import AutoModeNoticeScreen
+
+        if has_auto_mode_notice() or getattr(self, "_auto_mode_notice_pending", False):
+            return
+
+        def handle_result(accepted: bool | None) -> None:
+            self._auto_mode_notice_pending = False
+            if accepted is True:
+                save_auto_mode_notice()
+                return
+            asyncio.create_task(self._set_approval_mode(ApprovalMode.MANUAL))
+
+        try:
+            self.push_screen(AutoModeNoticeScreen(), handle_result)
+            self._auto_mode_notice_pending = True
+        except Exception:
+            logger.warning("Could not show Auto first-enable notice", exc_info=True)
+
         
     def action_toggle_debug_console(self) -> None:
         """Toggle the Debug Console overlay via keybind or the `/debug` command."""
@@ -3221,6 +3446,7 @@ class DCoderApp(App):
         """
         if self._chat_input:
             self.call_after_refresh(self._chat_input.focus_input)
+            self.set_timer(0.05, self._chat_input.focus_input)
 
     @on(Worker.StateChanged)
     def _on_worker_state_changed(self, event: Worker.StateChanged) -> None:
@@ -3353,15 +3579,17 @@ class DCoderApp(App):
         """
         from dcoder.commands.power.goal import GoalHandler, get_goal_state
         state = get_goal_state(self)
-        if not state.objective:
-            return
 
         result = str(rubric_msg.get("result", "")).lower()
-        logger.debug("Handling rubric_evaluation_end: result=%s for objective=%r", result, state.objective[:40])
-        if result in ("satisfied", "passed", "complete"):
-            state.status = "complete"
-        elif result in ("unsatisfied", "failed", "blocked"):
-            state.status = "blocked"
+        if state.objective:
+            logger.debug("Handling rubric_evaluation_end: result=%s for objective=%r", result, state.objective[:40])
+            if result in ("satisfied", "passed", "complete"):
+                state.status = "complete"
+            elif result in ("unsatisfied", "failed", "blocked"):
+                state.status = "blocked"
+
+        if state.next_rubric:
+            state.next_rubric = None
 
         GoalHandler._sync_status_rubric(self, state)
         self._focus_chat_input_after_refresh()
@@ -3371,23 +3599,84 @@ class DCoderApp(App):
     # ── Skill Command ────────────────────────────────────
 
     async def _handle_skill_command(self, command: str) -> None:
-        """Handle a /skill:<name> command by delegating to the power handler.
-
-        This method is called by convenience aliases like /remember and
-        /skill-creator that rewrite to /skill: commands.
-        """
-        from dcoder.commands._base import CommandContext
-        from dcoder.commands.power.skill_invoke import SkillInvokeHandler
+        """Handle a /skill:<name> command by invoking the skill directly."""
         from dcoder.skills.invocation import parse_skill_command
 
         skill_name, args = parse_skill_command(command)
-        ctx = CommandContext(
-            app=self,
-            raw_command=command,
-            args=f"{skill_name} {args}".strip() if skill_name else "",
+        await self._invoke_skill(skill_name, args, command=command)
+
+    async def _invoke_skill(
+        self,
+        skill_name: str,
+        args: str = "",
+        *,
+        command: str | None = None,
+    ) -> None:
+        """Load a skill, render its widget, and send its prompt to the agent.
+
+        Reference: deepagents_code/app.py L14172-L14323.
+        """
+        from dcoder.skills.invocation import build_skill_invocation_envelope
+        from dcoder.skills.loader import load_skill_content
+        from dcoder.ui.messages import AppMessage, ErrorMessage, SkillMessage, UserMessage
+
+        normalized_name = skill_name.strip().lower()
+
+        async def _mount_error(message: str) -> None:
+            if command is not None:
+                await self._mount_message(UserMessage(command))
+            await self._mount_message(AppMessage(message))
+
+        if not normalized_name:
+            if command is not None:
+                await self._mount_message(UserMessage(command))
+                await self._mount_message(AppMessage("Usage: /skill:<name> [args]"))
+            else:
+                await self._mount_message(AppMessage("Skill name is required."))
+            return
+
+        skills = self.get_discovered_skills()
+        cached = next(
+            (
+                s for s in skills
+                if str(s.get("name", "")).lower() == normalized_name
+                or (":" in str(s.get("name", "")) and str(s.get("name", "")).rsplit(":", 1)[-1].lower() == normalized_name)
+            ),
+            None,
         )
-        handler = SkillInvokeHandler()
-        await handler.execute(ctx)
+
+        if cached is None:
+            logger.warning("Skill not found: %r", normalized_name)
+            await _mount_error(f"Skill not found: {normalized_name}")
+            return
+
+        skill_path = str(cached.get("path", ""))
+        try:
+            content = load_skill_content(skill_path)
+        except Exception as exc:
+            logger.warning("Error reading skill %r: %s", normalized_name, exc)
+            await _mount_error(f"Error loading skill: {normalized_name}. {exc}")
+            return
+
+        if not content or not content.strip():
+            await _mount_error(
+                f"Skill '{normalized_name}' has an empty SKILL.md file. "
+                "Add instructions to the file before invoking."
+            )
+            return
+
+        envelope = build_skill_invocation_envelope(cached, content, args)
+
+        await self._mount_message(
+            SkillMessage(
+                skill_name=str(cached.get("name", "")),
+                description=str(cached.get("description", "")),
+                source=str(cached.get("source", "built-in")),
+                body=content,
+                args=args,
+            )
+        )
+        await self._send_to_agent(envelope.prompt)
 
     # ── Exit ─────────────────────────────────────────────
 

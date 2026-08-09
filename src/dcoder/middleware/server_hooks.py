@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
@@ -86,6 +87,8 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
     from langgraph.runtime import Runtime
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_DEADLINE = timedelta(seconds=600)
 _STOP_STATE_KEY = "_hooks_stop_continuation_count"
 _PRE_TOOL_STATE_KEY = "_hooks_pre_tool_outcomes"
@@ -121,6 +124,9 @@ class ServerHooksState(AgentState[Any]):
     _hooks_stop_continuation_count: NotRequired[Annotated[int, PrivateStateAttr]]
     _hooks_pre_tool_outcomes: NotRequired[
         Annotated[dict[str, _PreToolState], PrivateStateAttr]
+    ]
+    _hooks_pending_post_tools: NotRequired[
+        Annotated[dict[str, Any], PrivateStateAttr]
     ]
 
 
@@ -184,6 +190,22 @@ class ServerHooksMiddleware(AgentMiddleware[ServerHooksState, ContextT, Response
             and (server := _mcp_server_from_tool(tool)) is not None
         }
 
+    def before_model(
+        self,
+        state: ServerHooksState,
+        runtime: Runtime[ContextT],
+    ) -> dict[str, Any]:
+        """Run pre-execution hooks before downstream HITL middleware."""
+        return self._after_model(state, runtime)
+
+    async def abefore_model(
+        self,
+        state: ServerHooksState,
+        runtime: Runtime[ContextT],
+    ) -> dict[str, Any]:
+        """Run the async graph path through the same interrupt sequence."""
+        return self._after_model(state, runtime)
+
     def after_model(
         self,
         state: ServerHooksState,
@@ -219,9 +241,47 @@ class ServerHooksMiddleware(AgentMiddleware[ServerHooksState, ContextT, Response
             return started_or_blocked
         request = started_or_blocked
         started = time.perf_counter()
+        if call.name == _TASK_TOOL_NAME:
+            from langchain_core.callbacks.manager import dispatch_custom_event
+            subagent_type = str(call.args.get("subagent_type") or call.args.get("name") or call.args.get("agent") or "subagent")
+            description = str(call.args.get("description") or call.args.get("prompt") or call.args.get("task") or "")
+            try:
+                dispatch_custom_event(
+                    "subagent",
+                    {
+                        "type": "subagent",
+                        "phase": "start",
+                        "id": call.id,
+                        "subagent_type": subagent_type,
+                        "description": description,
+                        "label": f"{subagent_type}: {description}",
+                    },
+                    config=request.runtime.config,
+                )
+            except Exception as err:
+                logger.debug("Failed to dispatch subagent start custom event: %s", err)
+
         with _subagent_transcript_config(call, request.runtime.config):
             result = handler(request)
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        if call.name == _TASK_TOOL_NAME:
+            from langchain_core.callbacks.manager import dispatch_custom_event
+            outcome = "error" if _tool_result_failed(result, call.id) else "complete"
+            try:
+                dispatch_custom_event(
+                    "subagent",
+                    {
+                        "type": "subagent",
+                        "phase": outcome,
+                        "id": call.id,
+                        "duration_ms": duration_ms,
+                    },
+                    config=request.runtime.config,
+                )
+            except Exception as err:
+                logger.debug("Failed to dispatch subagent finish custom event: %s", err)
+
         result = _append_message_text(result, pre.context, call.id)
         result = self._maybe_post_tool_use(
             call, context, gate, request.runtime.config, result, duration_ms
@@ -249,9 +309,47 @@ class ServerHooksMiddleware(AgentMiddleware[ServerHooksState, ContextT, Response
             return started_or_blocked
         request = started_or_blocked
         started = time.perf_counter()
+        if call.name == _TASK_TOOL_NAME:
+            from langchain_core.callbacks.manager import adispatch_custom_event
+            subagent_type = str(call.args.get("subagent_type") or call.args.get("name") or call.args.get("agent") or "subagent")
+            description = str(call.args.get("description") or call.args.get("prompt") or call.args.get("task") or "")
+            try:
+                await adispatch_custom_event(
+                    "subagent",
+                    {
+                        "type": "subagent",
+                        "phase": "start",
+                        "id": call.id,
+                        "subagent_type": subagent_type,
+                        "description": description,
+                        "label": f"{subagent_type}: {description}",
+                    },
+                    config=request.runtime.config,
+                )
+            except Exception as err:
+                logger.debug("Failed to dispatch subagent start custom event: %s", err)
+
         with _subagent_transcript_config(call, request.runtime.config):
             result = await handler(request)
         duration_ms = int((time.perf_counter() - started) * 1000)
+
+        if call.name == _TASK_TOOL_NAME:
+            from langchain_core.callbacks.manager import adispatch_custom_event
+            outcome = "error" if _tool_result_failed(result, call.id) else "complete"
+            try:
+                await adispatch_custom_event(
+                    "subagent",
+                    {
+                        "type": "subagent",
+                        "phase": outcome,
+                        "id": call.id,
+                        "duration_ms": duration_ms,
+                    },
+                    config=request.runtime.config,
+                )
+            except Exception as err:
+                logger.debug("Failed to dispatch subagent finish custom event: %s", err)
+
         result = _append_message_text(result, pre.context, call.id)
         result = self._maybe_post_tool_use(
             call, context, gate, request.runtime.config, result, duration_ms

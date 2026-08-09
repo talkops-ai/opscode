@@ -97,7 +97,7 @@ class RubricHandler(BaseCommandHandler):
 
         # ── show / status ────────────────────────────────
         if sub in {"show", "status"}:
-            return self._show_rubric_state(state)
+            return self._show_rubric_state(ctx, state)
 
         # ── set <criteria> ───────────────────────────────
         if sub == "set":
@@ -112,8 +112,7 @@ class RubricHandler(BaseCommandHandler):
             return CommandResult(
                 success=True,
                 message="Rubric set.",
-                notify="Rubric updated",
-                mount_as_app_message=False,
+                notify="Rubric set",
             )
 
         # ── next <criteria> ──────────────────────────────
@@ -126,6 +125,7 @@ class RubricHandler(BaseCommandHandler):
             return CommandResult(
                 success=True,
                 message="Rubric set for next turn.",
+                notify="Rubric set for next turn",
             )
 
         # ── file <path> ──────────────────────────────────
@@ -136,6 +136,11 @@ class RubricHandler(BaseCommandHandler):
 
         # ── clear ────────────────────────────────────────
         if sub == "clear":
+            if not state.rubric and not state.next_rubric:
+                return CommandResult(
+                    success=True,
+                    message="No rubric set. Nothing to clear.",
+                )
             from langchain_core.messages import SystemMessage
             async with ctx.app._goal_state_mutation_boundary():
                 state.rubric = None
@@ -147,11 +152,9 @@ class RubricHandler(BaseCommandHandler):
                 success=True,
                 message="Rubric cleared.",
                 notify="Rubric cleared",
-                mount_as_app_message=False,
             )
 
         # ── model [provider:model | clear] ───────────────
-        # Reference: app.py L10364-L10376.
         if sub == "model":
             if not remainder or remainder.lower() == "clear":
                 state.rubric_model = None
@@ -166,7 +169,6 @@ class RubricHandler(BaseCommandHandler):
             )
 
         # ── max-iterations <N | clear> ───────────────────
-        # Reference: app.py L10378-L10397.
         if sub in {"max-iterations", "max_iterations"}:
             if not remainder:
                 return CommandResult(
@@ -192,60 +194,79 @@ class RubricHandler(BaseCommandHandler):
         # Unknown subcommand
         return self._show_usage(state)
 
-    def _show_rubric_state(self, state: "GoalState") -> CommandResult:
-        """Display current rubric state with grader config.
+    def _show_rubric_state(self, ctx: CommandContext, state: "GoalState") -> CommandResult:
+        """Display current rubric state matching reference deepagents_code.
 
-        Reference: app.py L11440-L11468.
+        Reference: app.py L13266-L13299.
         """
-        parts: list[str] = []
+        startup_model = ""
+        if hasattr(ctx.app, "model_id") and ctx.app.model_id:
+            startup_model = str(ctx.app.model_id)
+        elif hasattr(ctx.app, "settings") and ctx.app.settings.model:
+            startup_model = str(ctx.app.settings.model)
 
+        lines: list[str] = []
         if state.rubric:
-            parts.append(f"Active rubric:\n{state.rubric}")
+            lines.append(f"Rubric:\n{state.rubric}")
         if state.next_rubric:
-            parts.append(f"Next-turn rubric:\n{state.next_rubric}")
-        if state.objective:
-            parts.append(f"Goal:\n{state.objective}")
+            lines.append(f"Next-turn rubric:\n{state.next_rubric}")
 
-        # Grader settings
-        if state.rubric or state.next_rubric or state.rubric_model or state.rubric_max_iterations is not None:
-            grader_model, grader_iterations = state.grader_display_values()
-            parts.append(f"Grader: {grader_model} · max iterations: {grader_iterations}")
+        grader_model, grader_iterations = state.grader_display_values(startup_model)
 
-        if not parts:
+        if not lines:
+            if state.rubric_model or state.rubric_max_iterations is not None:
+                return CommandResult(
+                    success=True,
+                    message="\n\n".join([
+                        "No rubric set.",
+                        f"Rubric grader model: {grader_model}",
+                        f"Rubric max iterations: {grader_iterations}",
+                    ]),
+                )
             return CommandResult(
                 success=True,
-                message="No rubric set.",
+                message=(
+                    "No rubric set.\n\n"
+                    "Set one with `/rubric set <criteria>`, or load a file:\n"
+                    "  /rubric set tests pass; keep the diff minimal\n"
+                    "  /rubric file ./rubric.md"
+                ),
             )
 
-        return CommandResult(success=True, message="\n\n".join(parts))
+        lines.extend([
+            f"Rubric grader model: {grader_model}",
+            f"Rubric max iterations: {grader_iterations}",
+        ])
+        return CommandResult(success=True, message="\n\n".join(lines))
 
     def _show_usage(self, state: "GoalState") -> CommandResult:
         """Show usage help with current state if present.
 
-        Reference: app.py L11440-L11468.
+        Reference: app.py L13241-L13264.
         """
         usage = _rubric_usage_text()
 
-        # Append current state if any is set
         state_parts: list[str] = []
         if state.rubric:
-            state_parts.append(f"Active rubric:\n{state.rubric}")
+            state_parts.append("Rubric is set.")
         if state.next_rubric:
-            state_parts.append(f"Next-turn rubric:\n{state.next_rubric}")
+            state_parts.append("Next-turn rubric is set.")
         if state.rubric_model:
-            state_parts.append(f"Grader model: {state.rubric_model}")
+            state_parts.append(f"Rubric grader model: {state.rubric_model}")
         if state.rubric_max_iterations is not None:
-            state_parts.append(f"Max iterations: {state.rubric_max_iterations}")
+            state_parts.append(f"Rubric max iterations: {state.rubric_max_iterations}")
+        if state.rubric or state.next_rubric:
+            state_parts.append("Use /rubric show to view.")
 
         if state_parts:
-            usage += "\n\n" + "\n\n".join(state_parts)
+            usage += "\n\nCurrent state:\n" + "\n".join(f"  - {line}" for line in state_parts)
 
         return CommandResult(success=True, message=usage)
 
     async def _set_from_file(self, ctx: CommandContext, state: "GoalState", file_path: str) -> CommandResult:
         """Load criteria from a file.
 
-        Reference: app.py L11395-L11401.
+        Reference: app.py L13301-L13342.
         """
         path = Path(file_path).expanduser()
         if not path.is_file():
@@ -276,6 +297,6 @@ class RubricHandler(BaseCommandHandler):
             await ctx.app._persist_goal_rubric_state(notice=SystemMessage(content=f"Rubric loaded from file {path.name}"))
         return CommandResult(
             success=True,
-            message=f"Rubric loaded from `{path.name}` ({len(content)} chars).",
-            mount_as_app_message=False,
+            message=f"Rubric set from {path.name}.",
+            notify=f"Rubric set from {path.name}",
         )

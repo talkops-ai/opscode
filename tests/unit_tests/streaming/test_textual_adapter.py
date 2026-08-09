@@ -95,3 +95,47 @@ class TestTextualAdapterToolMessage:
             call_id="call_123", result="Tool output text", name="test_tool"
         )
         adapter._messages.append_assistant_token.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_duplicate_interrupts_deduplicated(self):
+        """Verify that duplicate interrupt events with the same interrupt_id are deduplicated."""
+        from dcoder.ui.textual_adapter import TextualAdapter
+
+        mock_app = MagicMock()
+        adapter = TextualAdapter(
+            app=mock_app,
+            client=MagicMock(),
+            assistant_id="mock_id",
+            status_bar=MagicMock(),
+        )
+
+        mock_interrupt = Mock()
+        mock_interrupt.id = "int_123"
+        mock_interrupt.value = {
+            "action_requests": [{"action": "edit_file", "args": {"file_path": "main.tf"}}]
+        }
+
+        async def mock_astream(input_data, *args, **kwargs):
+            from langgraph.types import Command
+            if isinstance(input_data, Command):
+                yield ((), "updates", {})
+            else:
+                # Emit duplicate interrupt events in the same turn (subagent level and parent level)
+                yield ((), "updates", {"__interrupt__": (mock_interrupt,)})
+                yield ((), "updates", {"__interrupt__": (mock_interrupt,)})
+
+        adapter._client.astream = mock_astream
+        from unittest.mock import AsyncMock
+        adapter._await_approval = AsyncMock(return_value=True)
+
+        await adapter.stream_turn(prompt="Test", thread_id="t1")
+
+        # Verify InterruptRaised message was posted EXACTLY ONCE
+        posted_interrupts = [
+            call[0][0]
+            for call in mock_app.post_message.call_args_list
+            if isinstance(call[0][0], TextualAdapter.InterruptRaised)
+        ]
+        assert len(posted_interrupts) == 1
+        assert posted_interrupts[0].tool_name == "edit_file"
+

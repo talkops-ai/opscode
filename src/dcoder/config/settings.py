@@ -99,11 +99,17 @@ def _load_dotenv(*, start_path: Path | None = None, refresh_loaded: bool = False
     # 1. Global ~/.dcoder/.env (individual provider keys live here)
     global_env = paths.GLOBAL_ENV_PATH
     if global_env.is_file():
-        loaded_vals.update(dotenv_values(global_env))
-        
+        try:
+            loaded_vals.update(dotenv_values(global_env))
+        except Exception:
+            pass
+
     # 2. Project/CWD .env (higher priority, overwrites global)
     if project_env:
-        loaded_vals.update(dotenv_values(project_env))
+        try:
+            loaded_vals.update(dotenv_values(project_env))
+        except Exception:
+            pass
         
     # Filter out denied keys
     for key in DOTENV_DENIED_ENV_KEYS:

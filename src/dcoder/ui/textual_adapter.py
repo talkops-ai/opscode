@@ -12,9 +12,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import math
 import time
 
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable
 
 from textual.message import Message
 
@@ -33,6 +35,24 @@ if TYPE_CHECKING:
     from dcoder.ui.status import StatusBar
 
 logger = logging.getLogger(__name__)
+
+
+def _read_mentioned_file(file_path: Path, max_embed_bytes: int = 256 * 1024) -> str:
+    """Read a mentioned file for inline embedding."""
+    file_size = file_path.stat().st_size
+    if file_size > max_embed_bytes:
+        size_kb = file_size // 1024
+        return (
+            f"\n### {file_path.name}\n"
+            f"Path: `{file_path}`\n"
+            f"Size: {size_kb}KB (too large to embed, use read_file tool to view)"
+        )
+    content = file_path.read_text(encoding="utf-8")
+    return f"\n### {file_path.name}\nPath: `{file_path}`\n```text\n{content}\n```"
+
+
+def _is_renderable_subagent_event(data: Any, *, is_main_agent: bool) -> bool:
+    return is_main_agent and isinstance(data, dict) and data.get("type") == "subagent"
 
 
 def _format_rubric_event(data: dict[str, Any]) -> str | None:
@@ -323,6 +343,7 @@ class TextualAdapter:
         status_bar: StatusBar | None = None,
         auto_approve: bool = False,
         set_spinner: Any = None,
+        on_subagent_event: Callable[[dict[str, Any]], None] | None = None,
         app: Any = None,
         prompt_manager: Any = None,
     ) -> None:
@@ -332,6 +353,7 @@ class TextualAdapter:
         self._status_bar: StatusBar | None = status_bar
         self._auto_approve = auto_approve
         self._set_spinner = set_spinner
+        self._on_subagent_event = on_subagent_event
         self._app = app
         self._prompt_manager = prompt_manager
         self._stats = SessionStats()
@@ -369,35 +391,49 @@ class TextualAdapter:
         graph_input: dict[str, Any] | None = None,
     ) -> None:
         """Run one agent turn, routing stream events to Textual widgets."""
-        from langchain_core.messages import AIMessageChunk, ToolMessage
-
-        self._cancel_event.clear()
-        self._active_tools_map.clear()
-
-        # Show the LoadingWidget spinner before streaming starts (matching
-        # reference dcode).  The status bar's set_status("Thinking...") was
-        # hardcoded and got stuck for non-reasoning models; the spinner
-        # widget gives a proper animated indicator with elapsed time.
-        if self._set_spinner:
-            try:
-                await self._set_spinner("Thinking")
-            except Exception:
-                pass
-        from langchain_core.messages import HumanMessage
+        import uuid
+        from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage
         from dcoder.middleware.auto_mode import USER_PROMPT_METADATA_KEY, user_prompt_metadata
+
+        turn_id: str | None = None
 
         if graph_input is not None:
             input_msg: dict[str, Any] = graph_input
         else:
+            from dcoder.input import parse_file_mentions
+
+            prompt_text, mentioned_files = parse_file_mentions(prompt)
+            max_embed_bytes = 256 * 1024
+
+            if mentioned_files:
+                context_parts = [prompt_text, "\n\n## Referenced Files\n"]
+                for file_path in mentioned_files:
+                    try:
+                        part = _read_mentioned_file(file_path, max_embed_bytes)
+                        context_parts.append(part)
+                    except Exception as e:
+                        context_parts.append(f"\n### {file_path.name}\n[Error reading file: {e}]")
+                final_content = "\n".join(context_parts)
+            else:
+                final_content = prompt_text
+
+            self._turn_number += 1
+            turn_id = str(uuid.uuid4())
+
             human_msg = HumanMessage(
-                content=prompt,
+                content=final_content,
                 additional_kwargs={
                     USER_PROMPT_METADATA_KEY: user_prompt_metadata(
                         literal_user_text=prompt,
+                        referenced_paths=[str(p) for p in mentioned_files],
+                        turn_id=turn_id,
                     )
                 },
             )
-            input_msg = {"messages": [human_msg]}
+            input_msg = {
+                "messages": [human_msg],
+                "goal_criteria_request": None,
+            }
 
             if self._app is not None:
                 from dcoder.commands.power.goal import get_goal_state, GoalHandler
@@ -413,16 +449,24 @@ class TextualAdapter:
                     goal_state.next_rubric = None  # One-turn quality gate
                     GoalHandler._sync_status_rubric(self._app, goal_state)
                 elif goal_state.rubric:
-                    input_msg["_sticky_rubric"] = goal_state.rubric
                     input_msg["rubric"] = goal_state.rubric
 
-        import uuid
+        from dcoder.approval_mode import ApprovalMode, approval_mode_key, awrite_approval_mode, coerce_approval_mode
         from dcoder.config.metadata import build_stream_config
 
-        self._turn_number += 1
-        turn_id = str(uuid.uuid4())
-        auto_approve_active = bool(getattr(self, "_auto_approve", False))
-        approval_mode_str = "yolo" if auto_approve_active else "manual"
+        raw_mode = getattr(self._app, "_approval_mode", ApprovalMode.MANUAL) if self._app is not None else ApprovalMode.MANUAL
+        selected_mode = raw_mode if isinstance(raw_mode, ApprovalMode) else coerce_approval_mode(raw_mode)
+
+        live_key = approval_mode_key(thread_id)
+        if self._app is not None and getattr(self._app, "_agent", None) is not None:
+            try:
+                res_key = await awrite_approval_mode(self._app._agent, thread_id, mode=selected_mode)
+                if res_key:
+                    live_key = res_key
+            except Exception:
+                logger.warning("Failed to persist approval mode to store", exc_info=True)
+
+        auto_approve_active = (selected_mode is ApprovalMode.YOLO)
 
         eff = None
         if self._app is not None:
@@ -436,9 +480,21 @@ class TextualAdapter:
             getattr(self, "_assistant_id", "agent"),
             turn_id=turn_id,
             turn_number=self._turn_number,
+            approval_mode=selected_mode.value,
+            approval_mode_key=live_key,
             auto_approve=auto_approve_active,
             reasoning_effort=eff or "medium",
         )
+        if context is None or not isinstance(context, dict):
+            context = {}
+        context["thread_id"] = thread_id
+        if turn_id is not None:
+            context["turn_id"] = turn_id
+
+        context["approval_mode"] = selected_mode.value
+        context["auto_approve"] = (selected_mode is not ApprovalMode.MANUAL)
+        context["approval_mode_key"] = live_key
+
         logger.debug("TUI: stream_turn start, thread_id: %s, context: %s", thread_id, context)
 
         start_t = time.time()
@@ -451,6 +507,7 @@ class TextualAdapter:
 
 
         first_token_received = False
+        turn_context_tokens = 0
 
         try:
             stream_input: Any = input_msg
@@ -493,7 +550,26 @@ class TextualAdapter:
                     is_main_agent = ns_key == ()
 
                     if current_stream_mode == "custom":
-                        if isinstance(data, dict):
+                        if isinstance(data, dict) and data.get("type") == "session_cost":
+                            total_usd = data.get("total")
+                            if isinstance(total_usd, (int, float)) and math.isfinite(total_usd) and total_usd >= 0:
+                                cost_val = float(total_usd)
+                                self._stats.total_cost_usd = cost_val
+                                if self._app:
+                                    setattr(self._app, "_session_cost_usd", cost_val)
+                                if self._status_bar is not None:
+                                    self._status_bar.set_cost(cost_val)
+                            continue
+
+                        if (
+                            self._on_subagent_event is not None
+                            and _is_renderable_subagent_event(data, is_main_agent=is_main_agent)
+                        ):
+                            try:
+                                self._on_subagent_event(data)
+                            except Exception:
+                                logger.exception("subagent panel event handler failed")
+                        elif isinstance(data, dict):
                             rubric_msg = data
                             formatted_event = _format_rubric_event(rubric_msg)
                             if formatted_event is not None and is_main_agent and self._messages is not None:
@@ -537,7 +613,8 @@ class TextualAdapter:
                                 
                                 if interrupt_val and interrupt_id:
                                     logger.debug("TUI: Handle interrupt %s: %s", interrupt_id, interrupt_val)
-                                    pending_interrupts.append((interrupt_id, interrupt_val))
+                                    if not any(int_id == interrupt_id for int_id, _ in pending_interrupts):
+                                        pending_interrupts.append((interrupt_id, interrupt_val))
                                     
                     elif current_stream_mode == "messages":
                         msg_obj, meta = data if isinstance(data, tuple) else (data, {})
@@ -558,48 +635,20 @@ class TextualAdapter:
                                 self._stats.output_tokens = out_toks
                             if inp_toks > 0 or out_toks > 0:
                                 context_toks = (inp_toks or 0) + (out_toks or 0)
+                                turn_context_tokens = context_toks
+                                prior_tokens = getattr(self._app, "_cumulative_session_tokens", 0) if self._app else 0
+                                total_tokens = prior_tokens + context_toks
                                 if self._app:
-                                    setattr(self._app, "_context_tokens", context_toks)
+                                    setattr(self._app, "_context_tokens", total_tokens)
                                 if self._status_bar is not None:
-                                    self._status_bar.set_tokens(context_toks)
-
-                            model_spec = getattr(self._app, "_model", "") if self._app else ""
-                            provider_part = ""
-                            model_part = ""
-                            if ":" in model_spec:
-                                provider_part, model_part = model_spec.split(":", 1)
-                            else:
-                                model_part = model_spec
-                                if self._app and hasattr(self._app, "_settings"):
-                                    provider_part = getattr(self._app._settings, "model_provider", "")
-
-                            resp_meta = getattr(msg_obj, "response_metadata", {}) or {}
-                            if isinstance(resp_meta, dict):
-                                model_part = resp_meta.get("model_name") or resp_meta.get("model") or model_part
-
-                            if model_part:
-                                try:
-                                    from dcoder.utils.cost_estimation import estimate_cost
-                                    cost = estimate_cost(usage_meta, model_name=model_part, provider=provider_part)
-                                    if cost is not None and cost > 0:
-                                        self._stats.total_cost_usd += cost
-                                        if self._app:
-                                            current_cost = getattr(self._app, "_session_cost_usd", 0.0)
-                                            new_cost = current_cost + cost
-                                            setattr(self._app, "_session_cost_usd", new_cost)
-                                            if self._status_bar is not None:
-                                                self._status_bar.set_cost(new_cost)
-                                        elif self._status_bar is not None:
-                                            self._status_bar.set_cost(self._stats.total_cost_usd)
-                                except Exception:
-                                    pass
+                                    self._status_bar.set_tokens(total_tokens)
 
                         if msg_obj.__class__.__name__ == "ToolMessage":
                             call_id = getattr(msg_obj, "tool_call_id", "") or ""
                             raw_name = getattr(msg_obj, "name", "") or ""
                             tool_name = raw_name if (raw_name and raw_name != "None") else self._active_tools_map.get(call_id, "tool")
                             content = str(getattr(msg_obj, "content", ""))
-                            if self._messages is not None:
+                            if self._messages is not None and is_main_agent:
                                 self._messages.update_tool_result(call_id=call_id, result=content, name=tool_name)
                             if self._set_spinner:
                                 try:
@@ -648,7 +697,7 @@ class TextualAdapter:
                                     if parsed_args is None:
                                         continue
                                         
-                                    if self._messages is not None:
+                                    if self._messages is not None and is_main_agent:
                                         self._messages.finish_assistant_message()
                                     # Clear namespace tracking so post-tool text starts
                                     # a fresh assistant bubble (matching reference).
@@ -660,7 +709,7 @@ class TextualAdapter:
                                         if self._set_spinner:
                                             await self._set_spinner("Thinking")
                                         
-                                        if self._messages is not None:
+                                        if self._messages is not None and is_main_agent:
                                             self._messages.add_tool_call(name=buffer_name, call_id=buffer_id, args=parsed_args)
                                             self._active_tools_map[buffer_id] = buffer_name
 
@@ -728,6 +777,9 @@ class TextualAdapter:
 
         finally:
             self._stats.wall_time_seconds += time.time() - start_t
+            if self._app and turn_context_tokens > 0:
+                prior = getattr(self._app, "_cumulative_session_tokens", 0)
+                setattr(self._app, "_cumulative_session_tokens", prior + turn_context_tokens)
             # Dismiss the spinner and clear the status bar on turn end.
             if self._set_spinner:
                 try:

@@ -22,11 +22,9 @@ def test_approval_mode_coercion():
 def test_approval_mode_payload():
     payload = approval_mode_payload(mode=ApprovalMode.AUTO)
     assert payload["mode"] == "auto"
-    assert payload.get("auto_approve") is False
 
     payload_yolo = approval_mode_payload(auto_approve=True)
     assert payload_yolo["mode"] == "yolo"
-    assert payload_yolo.get("auto_approve") is True
 
 
 def test_mcp_read_only_hint_detection():

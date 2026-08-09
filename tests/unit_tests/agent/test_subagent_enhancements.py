@@ -28,6 +28,20 @@ def test_subagent_cli_middleware_injects_hitl():
     assert any(isinstance(mw, HumanInTheLoopMiddleware) for mw in middlewares_with_hitl)
 
 
+def test_subagent_cli_middleware_ordering():
+    """Verify that AsyncApprovalHITLMiddleware is at index 0 when interrupt_on is provided."""
+    interrupt_on_config = {"write_file": {}}
+    middlewares = _subagent_cli_middleware(
+        has_explicit_model=False,
+        assistant_id="test",
+        subagent_name="test_sub",
+        interrupt_on=interrupt_on_config,
+    )
+    assert len(middlewares) > 0
+    assert isinstance(middlewares[0], AsyncApprovalHITLMiddleware)
+
+
+
 @patch("deepagents.create_deep_agent")
 @patch("dcoder.subagents.get_built_in_subagents")
 @patch("dcoder.subagents.list_subagents")
@@ -70,3 +84,81 @@ def test_create_dcoder_agent_injects_filesystem_middleware(mock_list_subagents, 
     # Verify the tools in FilesystemMiddleware match what was passed
     tool_names = [t.name for t in fs_middlewares[0].tools]
     assert tool_names == ["read_file", "write_file"]
+
+
+@patch("deepagents.create_deep_agent")
+@patch("dcoder.subagents.get_built_in_subagents")
+@patch("dcoder.subagents.list_subagents")
+def test_create_dcoder_agent_sets_empty_subagent_interrupt_on(mock_list_subagents, mock_get_built_in, mock_create_deep_agent):
+    mock_list_subagents.return_value = []
+    mock_get_built_in.return_value = [{"name": "dummy_subagent", "description": "dummy"}]
+    mock_create_deep_agent.return_value = MagicMock()
+
+    from langchain_core.language_models import BaseChatModel
+    fake_model = MagicMock(spec=BaseChatModel)
+
+    create_dcoder_agent(
+        model=fake_model,
+        interactive=True,
+        auto_approve=False,
+    )
+
+    call_kwargs = mock_create_deep_agent.call_args.kwargs
+    subagents = call_kwargs.get("subagents")
+    assert subagents is not None
+
+    dummy = next(sub for sub in subagents if sub["name"] == "dummy_subagent")
+    assert dummy.get("interrupt_on") == {}
+
+
+@patch("deepagents.create_deep_agent")
+@patch("dcoder.subagents.get_built_in_subagents")
+@patch("dcoder.subagents.list_subagents")
+def test_create_dcoder_agent_blocks_runnable_compiled_subagent_with_fs_tools(
+    mock_list_subagents, mock_get_built_in, mock_create_deep_agent
+):
+    mock_list_subagents.return_value = []
+    mock_get_built_in.return_value = [{"name": "compiled_sub", "runnable": MagicMock()}]
+
+    from langchain_core.language_models import BaseChatModel
+
+    fake_model = MagicMock(spec=BaseChatModel)
+
+    with pytest.raises(ValueError, match="Cannot enforce --allow-fs-tools on compiled subagent"):
+        create_dcoder_agent(
+            model=fake_model,
+            fs_tools=["read_file"],
+            interactive=False,
+        )
+
+
+@patch("dcoder.subagents.loader.load_async_subagents")
+@patch("deepagents.create_deep_agent")
+@patch("dcoder.subagents.get_built_in_subagents")
+@patch("dcoder.subagents.list_subagents")
+def test_create_dcoder_agent_loads_async_subagents_by_default(
+    mock_list_subagents, mock_get_built_in, mock_create_deep_agent, mock_load_async
+):
+    mock_list_subagents.return_value = []
+    mock_get_built_in.return_value = []
+    mock_load_async.return_value = [
+        {"name": "async_researcher", "description": "remote", "graph_id": "agent"}
+    ]
+    mock_create_deep_agent.return_value = MagicMock()
+
+    from langchain_core.language_models import BaseChatModel
+
+    fake_model = MagicMock(spec=BaseChatModel)
+
+    create_dcoder_agent(
+        model=fake_model,
+        interactive=False,
+    )
+
+    assert mock_load_async.called
+    call_kwargs = mock_create_deep_agent.call_args.kwargs
+    subagents = call_kwargs.get("subagents")
+    assert subagents is not None
+    assert any(sub.get("name") == "async_researcher" for sub in subagents)
+
+

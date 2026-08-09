@@ -1,59 +1,40 @@
 """Tests for compaction middleware."""
 
+from unittest.mock import MagicMock
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
-from dcoder.middleware.compaction import CLICompactionMiddleware
+from langchain_core.language_models import BaseChatModel
+from deepagents.backends.filesystem import FilesystemBackend
+from dcoder.middleware.compaction import (
+    CLICompactionMiddleware,
+    _create_cli_compaction_middleware,
+)
+
 
 class TestCompactionMiddleware:
-    def test_compaction_triggers_on_threshold(self):
-        """Compaction triggers when messages exceed the threshold."""
-        middleware = CLICompactionMiddleware(max_message_lines=10, thread_id="test_thread")
-        
-        from langchain_core.messages import BaseMessage
-        from typing import cast, Any
-        messages: list[BaseMessage] = [SystemMessage(content="System prompt")]
-        for i in range(20):
-            messages.append(HumanMessage(content=f"Message {i}\nLine 2\nLine 3"))
-            
-        state = cast(Any, {"messages": messages})
-        res = middleware.before_agent(state, runtime=None, config=None)
-        
-        assert res is not None
-        compacted = res["messages"]
-        assert len(compacted) < len(messages)
-        assert any("[Compacted Conversation History" in str(m.content) for m in compacted)
+    def test_create_cli_compaction_middleware(self, tmp_path):
+        """Verify _create_cli_compaction_middleware creates a valid CLICompactionMiddleware."""
+        fake_model = MagicMock(spec=BaseChatModel)
+        backend = FilesystemBackend(root_dir=str(tmp_path))
 
-    def test_compaction_preserves_system_message(self):
-        """System prompt is never summarized."""
-        middleware = CLICompactionMiddleware(max_message_lines=10, thread_id="test_thread")
-        
-        from langchain_core.messages import BaseMessage
-        from typing import cast, Any
-        messages: list[BaseMessage] = [SystemMessage(content="System prompt")]
-        for i in range(20):
-            messages.append(HumanMessage(content=f"Message {i}\nLine 2\nLine 3"))
-            
-        state = cast(Any, {"messages": messages})
-        res = middleware.before_agent(state, runtime=None, config=None)
-        
-        compacted = res["messages"]
-        assert isinstance(compacted[0], SystemMessage)
-        assert compacted[0].content == "System prompt"
+        middleware = _create_cli_compaction_middleware(fake_model, backend)
 
-    def test_compaction_result_is_valid_message(self):
-        """The resulting summary is a valid HumanMessage."""
-        middleware = CLICompactionMiddleware(max_message_lines=10, thread_id="test_thread")
-        
-        from langchain_core.messages import BaseMessage
-        from typing import cast, Any
-        messages: list[BaseMessage] = [SystemMessage(content="System prompt")]
-        for i in range(20):
-            messages.append(HumanMessage(content=f"Message {i}\nLine 2\nLine 3"))
-            
-        state = cast(Any, {"messages": messages})
-        res = middleware.before_agent(state, runtime=None, config=None)
-        
-        compacted = res["messages"]
-        # In this implementation, the summary is placed as a SystemMessage at index 1
-        assert isinstance(compacted[1], SystemMessage)
-        assert "[Compacted Conversation History" in str(compacted[1].content)
+        assert isinstance(middleware, CLICompactionMiddleware)
+        assert middleware.name == "SummarizationMiddleware"
+        assert len(middleware.tools) == 1
+        assert middleware.tools[0].name == "compact_conversation"
+
+    def test_offload_rejection_unauthorized(self, tmp_path):
+        """Unauthorized tool call when offload_tool_call_id is set is rejected."""
+        fake_model = MagicMock(spec=BaseChatModel)
+        backend = FilesystemBackend(root_dir=str(tmp_path))
+        middleware = _create_cli_compaction_middleware(fake_model, backend)
+
+        mock_request = MagicMock()
+        mock_request.runtime.context = {"offload_tool_call_id": "authorized-123"}
+        mock_request.tool_call = {"id": "unauthorized-456", "name": "read_file", "args": {}}
+        mock_request.state = {"messages": []}
+
+        rejection = middleware._offload_rejection(mock_request)
+        assert rejection is not None
+        assert "Not executed: /offload only authorizes" in rejection.content
+

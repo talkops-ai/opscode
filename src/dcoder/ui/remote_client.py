@@ -77,7 +77,14 @@ def _parse_stream_item(raw_item: Any) -> tuple[tuple[str, ...], str, Any] | None
 
 
 class RemoteAgent:
-    """Client that talks to a LangGraph server over HTTP+SSE."""
+    """Client that talks to a LangGraph server over HTTP+SSE.
+
+    Wraps `langgraph.pregel.remote.RemoteGraph` which handles SSE parsing,
+    stream-mode negotiation (`messages-tuple`), namespace extraction, and
+    interrupt detection. This class adds streamed message-object conversion for
+    the Textual adapter and thread-ID normalization. State snapshots are
+    returned as provided by the server.
+    """
 
     def __init__(
         self,
@@ -87,10 +94,10 @@ class RemoteAgent:
         api_key: str | None = None,
         headers: dict[str, str] | None = None,
     ) -> None:
-        self._url = url
+        self._url = url.rstrip("/")
         self._graph_name = graph_name
         self._api_key = api_key
-        self._headers = headers
+        self._headers = dict(headers or {})
         self._graph: Any = None
 
     def _get_graph(self) -> Any:
@@ -101,7 +108,7 @@ class RemoteAgent:
                 self._graph_name,
                 url=self._url,
                 api_key=self._api_key,
-                headers=self._headers,
+                headers=self._headers if self._headers else None,
             )
         return self._graph
 
@@ -195,10 +202,30 @@ class RemoteAgent:
         """
         graph = self._get_graph()
         prepared = _prepare_config(config)
+
+        # Sanitize values to ensure messages are JSON serializable
+        clean_values = dict(values)
+        if "messages" in clean_values and isinstance(clean_values["messages"], list):
+            clean_msgs = []
+            for m in clean_values["messages"]:
+                if hasattr(m, "content") and hasattr(m, "type"):
+                    clean_msgs.append({"role": getattr(m, "type", "system"), "content": str(m.content)})
+                elif isinstance(m, dict):
+                    clean_msgs.append(m)
+                else:
+                    clean_msgs.append(str(m))
+            clean_values["messages"] = clean_msgs
+
         kwargs: dict[str, Any] = {}
         if as_node is not None:
             kwargs["as_node"] = as_node
-        return await graph.aupdate_state(prepared, values, **kwargs)
+
+        try:
+            return await graph.aupdate_state(prepared, clean_values, **kwargs)
+        except Exception:
+            if as_node is not None:
+                return await graph.aupdate_state(prepared, clean_values)
+            raise
 
     async def aensure_thread(self, config: dict[str, Any]) -> None:
         """Ensure the remote thread record exists before reading/mutating state.
@@ -216,11 +243,16 @@ class RemoteAgent:
         if not thread_id:
             return
 
+        metadata = prepared.get("metadata")
+        thread_metadata = metadata if isinstance(metadata, dict) else None
+
         try:
             client = graph._validate_client()
             await client.threads.create(
                 thread_id=thread_id,
                 if_exists="do_nothing",
+                metadata=thread_metadata,
+                graph_id=self._graph_name,
             )
         except Exception:
             logger.warning(
@@ -228,6 +260,7 @@ class RemoteAgent:
                 thread_id,
                 exc_info=True,
             )
+            raise
 
     async def create_thread(self) -> dict[str, Any]:
         """Create thread using SDK client."""

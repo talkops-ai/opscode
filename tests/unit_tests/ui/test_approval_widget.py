@@ -94,3 +94,92 @@ async def test_approval_menu_reject_with_reason():
     result = future.result()
     assert result["type"] == "reject"
     assert result["message"] == "Do not destroy prod DB"
+
+
+@pytest.mark.asyncio
+async def test_app_approval_menu_decided_removes_widget(monkeypatch):
+    """Test that _on_approval_menu_decided removes the pending approval widget from DOM."""
+    from dcoder.ui.app import DCoderApp
+
+    app = DCoderApp()
+    removed = False
+
+    class MockMenu:
+        async def remove(self):
+            nonlocal removed
+            removed = True
+
+    mock_menu = MockMenu()
+    app._pending_approval_widget = mock_menu
+
+    # Mock _focus_chat_input_after_refresh
+    monkeypatch.setattr(app, "_focus_chat_input_after_refresh", lambda: None)
+
+    event = ApprovalMenu.Decided(
+        decision={"type": "approve"},
+        approved=True,
+        tool_name="edit_file",
+        call_id="call-123",
+        comment="",
+    )
+
+    await app._on_approval_menu_decided(event)
+
+    assert removed is True
+    assert app._pending_approval_widget is None
+
+
+@pytest.mark.asyncio
+async def test_app_interrupt_raised_waits_for_pending_approval(monkeypatch):
+    """Test that _on_interrupt_raised waits for active pending approval widget to clear."""
+    from dcoder.ui.app import DCoderApp
+    from dcoder.ui.textual_adapter import TextualAdapter
+
+    app = DCoderApp()
+    app._pending_approval_widget = "active_dummy_widget"
+
+    # Async task that clears pending approval after a short delay
+    async def clear_widget_later():
+        await asyncio.sleep(0.02)
+        app._pending_approval_widget = None
+
+    asyncio.create_task(clear_widget_later())
+
+    # Mock query_one to prevent requiring a full Textual app DOM tree
+    mounted_widgets = []
+
+    class MockMessageList:
+        def mount_inline_prompt(self, menu):
+            mounted_widgets.append(menu)
+
+    monkeypatch.setattr(app, "query_one", lambda selector, expect_type=None: MockMessageList())
+    monkeypatch.setattr(app, "call_after_refresh", lambda func: None)
+
+    event = TextualAdapter.InterruptRaised("write_file", "call-456", {"file_path": "foo.py"})
+    await app._on_interrupt_raised(event)
+
+    assert len(mounted_widgets) == 1
+    assert app._pending_approval_widget is mounted_widgets[0]
+
+
+@pytest.mark.asyncio
+async def test_task_approval_widget_rendering():
+    """Verify TaskApprovalWidget renders subagent_type, warning, and task instructions."""
+    from dcoder.ui.tool_renderers import TaskRenderer
+    from dcoder.ui.tool_widgets import TaskApprovalWidget
+
+    tool_args = {
+        "subagent_type": "terraform-reviewer",
+        "description": "Audit main.tf and variables.tf for security issues.",
+    }
+    widget_cls, args = TaskRenderer.get_approval_widget(tool_args)
+    assert widget_cls is TaskApprovalWidget
+
+    widget = widget_cls(args)
+    children = list(widget.compose())
+    assert len(children) == 4
+    assert "terraform-reviewer" in str(children[0].render())
+    assert "Subagent will have access" in str(children[1].render())
+    assert "Audit main.tf" in str(children[3].render())
+
+

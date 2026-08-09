@@ -1,60 +1,118 @@
 ---
 name: remember
-description: "Save learnings, conventions, and project-specific knowledge to AGENTS.md memory files"
-domain: general
-allowed_tools:
-  - write_file
-  - read_file
-metadata:
-  domain: general
-  difficulty: beginner
+description: "Review the current conversation and capture valuable knowledge — best practices, coding conventions, architecture decisions, workflows, and user feedback — into persistent memory (AGENTS.md) or reusable skills. Use when the user says: (1) remember this, (2) save what we learned, (3) update memory, (4) capture learnings."
+license: MIT
+compatibility: designed for dcoder
 ---
 
-# Remember Skill
+Review our conversation and capture valuable knowledge. Focus especially on **best practices** we discussed or discovered—these are the most important things to preserve.
 
-You are a helpful assistant that saves project conventions, learnings, and preferences to memory files.
+## Step 1: Identify Best Practices and Key Learnings
 
-## How Memory Works
+Scan the conversation for:
 
-DCoder uses `AGENTS.md` files to persist knowledge across sessions. These files are automatically injected into the system prompt on every session start.
+### Best Practices (highest priority)
+- **Patterns that worked well** - approaches, techniques, or solutions we found effective
+- **Anti-patterns to avoid** - mistakes, gotchas, or approaches that caused problems
+- **Quality standards** - criteria we established for good code, documentation, or processes
+- **Decision rationale** - why we chose one approach over another
 
-## Memory File Locations
+### Other Valuable Knowledge
+- Coding conventions and style preferences
+- Project architecture decisions
+- Workflows and processes we developed
+- Tools, libraries, or techniques worth remembering
+- Feedback I gave about your behavior or outputs
 
-| Location | Scope | When to Use |
-|----------|-------|-------------|
-| `~/.dcoder/AGENTS.md` | Global (all projects) | User preferences, coding style, tool preferences |
-| `{project}/.agents/AGENTS.md` | Project-specific | Project conventions, architecture decisions, team rules |
-| `{project}/.dcoder/AGENTS.md` | Project + DCoder specific | DevOps conventions, deployment procedures |
+## Step 2: Decide Where to Store Each Learning
 
-## When to Save
+For each best practice or learning, choose the right destination:
 
-Save to memory when:
-- The user explicitly asks to remember something.
-- A project convention or pattern is established that should persist.
-- A debugging insight is discovered that would help future sessions.
-- The user corrects a mistake — remember the correction for next time.
+### -> Memory (AGENTS.md) for preferences and guidelines
+Use memory when the knowledge is:
+- A preference or guideline (not a multi-step process)
+- Something to always keep in mind
+- A simple rule or pattern
 
-## Format
+**Global** (`~/.dcoder/AGENTS.md` or `~/.gemini/config/AGENTS.md`): Universal preferences across all projects
+**Project** (`.agents/AGENTS.md` or `AGENTS.md`): Project-specific conventions and decisions
 
-Append to the appropriate `AGENTS.md` file using clear, concise entries:
+### -> Skill for reusable workflows and methodologies
+**Create a skill when** we developed:
+- A multi-step process worth reusing
+- A methodology for a specific type of task
+- A workflow with best practices baked in
+- A procedure that should be followed consistently
 
-```markdown
-## Project Conventions
+Skills are more powerful than memory entries because they can encode **how** to do something well, not just **what** to remember.
 
-- Use Terraform workspaces for environment isolation (not directory-based).
-- All Helm charts must pass `helm lint` before merge.
-- Kubernetes namespaces follow `{team}-{env}` naming (e.g., `platform-prod`).
+## Step 3: Create Skills for Significant Best Practices
 
-## Deployment Notes
+If we established best practices around a workflow or process, capture them in a skill.
 
-- Production deploys require ArgoCD sync with manual approval.
-- Staging auto-syncs from `main` branch via ArgoCD ApplicationSet.
+**Example:** If we discussed best practices for code review, create a `code-review` skill that encodes those practices into a reusable workflow.
+
+### Skill Location
+`~/.dcoder/skills/<skill-name>/SKILL.md` or `.agents/skills/<skill-name>/SKILL.md`
+
+### Skill Structure
+```
+skill-name/
+├── SKILL.md          (required - main instructions with best practices)
+├── scripts/          (optional - executable code)
+├── references/       (optional - detailed documentation)
+└── assets/           (optional - templates, examples)
 ```
 
-## Rules
+### SKILL.md Format
+```markdown
+---
+name: skill-name
+description: "What this skill does AND when to use it. Include triggers like 'when the user asks to X' or 'when working with Y'. This description determines when the skill activates."
+---
 
-- **Never overwrite** existing AGENTS.md content — always **append**.
-- Keep entries concise and actionable.
-- Use markdown headers to group related entries.
-- Ask the user which scope (global vs project) if unclear.
-- Confirm what was saved after writing.
+# Skill Name
+
+## Overview
+Brief explanation of what this skill accomplishes.
+
+## Best Practices
+Capture the key best practices upfront:
+- Best practice 1: explanation
+- Best practice 2: explanation
+
+## Process
+Step-by-step instructions (imperative form):
+1. First, do X
+2. Then, do Y
+3. Finally, do Z
+
+## Common Pitfalls
+- Pitfall to avoid and why
+- Another anti-pattern we discovered
+```
+
+### Key Principles
+1. **Encode best practices prominently** - Put them near the top so they guide the entire workflow
+2. **Concise is key** - Only include non-obvious knowledge. Every paragraph should justify its token cost.
+3. **Clear triggers** - The description determines when the skill activates. Be specific.
+4. **Imperative form** - Write as commands: "Create a file" not "You should create a file"
+5. **Include anti-patterns** - What NOT to do is often as valuable as what to do
+
+## Step 4: Update Memory for Simpler Learnings
+
+For preferences, guidelines, and simple rules that don't warrant a full skill:
+
+```markdown
+## Best Practices
+- When doing X, always Y because Z
+- Avoid A because it leads to B
+```
+
+Use `replace_file_content` or `multi_replace_file_content` to update existing files or `write_to_file` to create new ones.
+
+## Step 5: Summarize Changes
+
+List what you captured and where you stored it:
+- Skills created (with key best practices encoded)
+- Memory entries added (with location)

@@ -235,3 +235,27 @@ async def test_app_focus_restoration_on_rubric_evaluation_end(monkeypatch):
     assert state.status == "complete"
     assert focus_called is True
 
+
+@pytest.mark.asyncio
+async def test_app_focus_restoration_on_adhoc_rubric_evaluation_end(monkeypatch):
+    """Test that _handle_rubric_evaluation_end clears next_rubric and triggers focus restoration even without a goal objective."""
+    from dcoder.ui.app import DCoderApp
+    from dcoder.commands.power.goal import get_goal_state
+
+    app = DCoderApp()
+    state = get_goal_state(app)
+    state.objective = None
+    state.next_rubric = "One turn criteria"
+
+    focus_called = False
+
+    def mock_focus():
+        nonlocal focus_called
+        focus_called = True
+
+    monkeypatch.setattr(app, "_focus_chat_input_after_refresh", mock_focus)
+
+    app._handle_rubric_evaluation_end({"type": "rubric_evaluation_end", "result": "satisfied"})
+    assert state.next_rubric is None
+    assert focus_called is True
+

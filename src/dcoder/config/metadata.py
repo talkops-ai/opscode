@@ -151,6 +151,8 @@ def build_stream_config(
     sandbox_type: str | None = None,
     turn_id: str | None = None,
     turn_number: int | None = None,
+    approval_mode: str | None = None,
+    approval_mode_key: str | None = None,
     auto_approve: bool = False,
     cwd: str | Path | None = None,
     reasoning_effort: str | None = "medium",

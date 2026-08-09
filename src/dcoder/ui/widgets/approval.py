@@ -372,7 +372,7 @@ class ApprovalMenu(Container):
         if not self._is_minimal:
             await self._update_tool_info()
         self._update_options()
-        self.focus()
+        self.call_after_refresh(self.focus)
 
     async def _update_tool_info(self) -> None:
         """Mount tool-specific approval widgets."""

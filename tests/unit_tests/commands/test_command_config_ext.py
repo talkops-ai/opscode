@@ -166,9 +166,11 @@ class TestLoginHandler:
 
 class TestLogoutHandler:
     @pytest.mark.asyncio
-    async def test_clears_credentials(self):
+    async def test_clears_credentials(self, tmp_path, monkeypatch):
         from dcoder.commands.core.auth import LogoutHandler
         import os
+        from dcoder.config import paths
+        monkeypatch.setattr(paths, "GLOBAL_ENV_PATH", tmp_path / ".env")
         os.environ["ANTHROPIC_API_KEY"] = "test-key"
         ctx = _make_ctx(raw="/logout")
         res = await LogoutHandler().execute(ctx)

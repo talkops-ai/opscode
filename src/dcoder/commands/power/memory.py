@@ -1,7 +1,8 @@
 """``/memory`` (``/remember``) — Conversation learning extraction and memory management.
 
-Reference: deepagents_code/app.py L12002 — ``/remember`` is an alias for
-``/skill:remember`` which extracts learnings from conversation history.
+Reference: deepagents_code/app.py L13864-L13878 and command_registry.py.
+``/remember`` is an alias for ``/skill:remember`` which extracts learnings
+from conversation history into persistent memory (AGENTS.md) or skills.
 """
 
 from __future__ import annotations
@@ -22,15 +23,16 @@ logger = logging.getLogger(__name__)
 class MemoryHandler(BaseCommandHandler):
     """Manage conversation learnings and persisted memories.
 
-    Subcommands:
-      ``/memory``            — usage help
-      ``/memory show``       — list all persisted memories
-      ``/memory get <key>``  — show a specific memory
-      ``/memory save <key> <content>`` — save a memory directly
-      ``/memory delete <key>`` — delete a memory
-      ``/memory clear``      — delete all project-scoped memories
-      ``/remember``          — invoke skill:remember to extract learnings
-      ``/remember <text>``   — save text as a memory directly
+    Subcommands & Syntax:
+      ``/memory``                      — extract learnings via /skill:remember
+      ``/remember``                    — extract learnings via /skill:remember
+      ``/remember <instruction>``      — extract learnings with explicit focus
+      ``/memory show``                 — list active AGENTS.md memories & stored entries
+      ``/memory search <query>``       — search active memories & stored entries
+      ``/memory get <key>``            — show a specific stored memory
+      ``/memory save <key> <content>`` — save a key-value memory directly
+      ``/memory delete <key>``         — delete a stored memory
+      ``/memory clear``                — clear stored project memories
     """
 
     @property
@@ -56,20 +58,14 @@ class MemoryHandler(BaseCommandHandler):
     async def execute(self, ctx: CommandContext) -> CommandResult:
         from dcoder.memory.store import MemoryStore
 
-        cmd_name = ctx.raw_command.strip().split()[0].lower()
         args = ctx.args.strip()
 
         # Project root detection
         project_root = _detect_project_root()
         store = MemoryStore(project_root=project_root)
 
-        # ── /remember (skill alias) ──────────────────────
-        if cmd_name == "/remember":
-            return await self._handle_remember(ctx, store, args)
-
-        # ── /memory subcommands ──────────────────────────
         if not args:
-            return self._usage()
+            return await self._handle_skill_remember(ctx, "")
 
         sub, _, remainder = args.partition(" ")
         sub = sub.lower()
@@ -77,6 +73,9 @@ class MemoryHandler(BaseCommandHandler):
 
         if sub in {"show", "list"}:
             return self._show_memories(store)
+
+        if sub in {"search", "find"}:
+            return self._search_memories(store, remainder)
 
         if sub == "get":
             if not remainder:
@@ -111,85 +110,147 @@ class MemoryHandler(BaseCommandHandler):
                 message=f"Cleared {count} memory entries." if count else "No memories to clear.",
             )
 
-        return self._usage()
+        # For any non-subcommand args (e.g. /remember prefer terraform over tofu), invoke skill:remember
+        return await self._handle_skill_remember(ctx, args)
 
-    async def _handle_remember(
+    async def _handle_skill_remember(
         self,
         ctx: CommandContext,
-        store: "MemoryStore",
         args: str,
     ) -> CommandResult:
-        """Handle ``/remember`` — extract learnings or save directly.
+        """Handle ``/remember [args]`` — rewrite to ``/skill:remember [args]``.
 
-        Reference: deepagents_code/app.py L12002-L12016.
-        ``/remember`` with no args invokes ``/skill:remember``.
-        ``/remember <text>`` saves text directly as a memory.
+        Reference: deepagents_code/app.py L13864-L13878.
         """
-        from dcoder.memory.store import MemoryStore
-
-        if args:
-            # Direct save: /remember prefer terraform fmt over tofu
-            import re
-            import time
-
-            # Generate a key from the first few words
-            words = re.sub(r"[^\w\s-]", "", args).split()[:5]
-            key = "-".join(words).lower()
-            path = store.save(key, args)
-            return CommandResult(
-                success=True,
-                message=f"✅ Memory saved: `{key}` → `{path}`",
-            )
-
-        # No args: invoke skill:remember for conversation extraction
         app = ctx.app
+        # Guard: if called bare with no messages in conversation, output hint
+        if not args:
+            has_messages = True
+            if app is not None and hasattr(app, "_has_conversation_messages"):
+                has_messages = await app._has_conversation_messages()
+
+            if not has_messages:
+                return CommandResult(
+                    success=True,
+                    message="Nothing to remember yet. Start a conversation first,"
+                    " then use /remember to capture learnings.",
+                )
+
+        rewritten = f"/skill:remember {args}" if args else "/skill:remember"
+
         if app is not None and hasattr(app, "_handle_skill_command"):
             try:
-                # Check if there are conversation messages first
-                has_messages = True
-                if hasattr(app, "_has_conversation_messages"):
-                    has_messages = await app._has_conversation_messages()
-
-                if not has_messages:
-                    return CommandResult(
-                        success=True,
-                        message="Nothing to remember yet. Start a conversation first, "
-                        "then use `/remember` to capture learnings.",
-                    )
-
-                await app._handle_skill_command("/skill:remember")
+                await app._handle_skill_command(rewritten)
                 return CommandResult(
                     success=True,
                     message=None,
                     mount_as_app_message=False,
                 )
             except Exception as exc:
-                logger.warning("Failed to invoke skill:remember: %s", exc)
+                logger.warning("Failed to invoke %s: %s", rewritten, exc)
 
-        return CommandResult(
-            success=True,
-            message="The `remember` skill is not available. "
-            "Use `/memory save <key> <content>` to save memories directly.",
+        # Fallback to direct SkillInvokeHandler if app is not attached
+        from dcoder.commands.power.skill_invoke import SkillInvokeHandler
+
+        skill_ctx = CommandContext(
+            app=ctx.app,
+            session=ctx.session,
+            agent=ctx.agent,
+            settings=ctx.settings,
+            raw_command=rewritten,
+            args=f"remember {args}".strip(),
+            thread_id=ctx.thread_id,
+            model_spec=ctx.model_spec,
         )
+        return await SkillInvokeHandler().execute(skill_ctx)
 
     def _show_memories(self, store: "MemoryStore") -> CommandResult:
+        """List currently active memories loaded from AGENTS.md files and MemoryStore."""
+        from dcoder.memory.registry import MemoryRegistry
+
+        lines = ["**Active Memories & Knowledge:**", ""]
+        agents_found = 0
+
+        # Read active AGENTS.md paths
+        try:
+            paths = MemoryRegistry.get_instance().get_memory_paths_for_scope("auto")
+            for path in paths:
+                if path.is_file():
+                    content = path.read_text(encoding="utf-8").strip()
+                    if content:
+                        agents_found += 1
+                        lines.append(f"📄 **{path}**")
+                        preview = "\n".join(f"   {line}" for line in content.splitlines()[:10])
+                        lines.append(preview)
+                        if len(content.splitlines()) > 10:
+                            lines.append("   *... [truncated]*")
+                        lines.append("")
+        except Exception as exc:
+            logger.debug("Failed to read AGENTS.md files: %s", exc)
+
+        # Key-Value MemoryStore entries
         entries = store.list_all()
-        if not entries:
+        if entries:
+            lines.append("**Persisted Key-Value Memories:**")
+            for entry in entries:
+                preview = entry.content.strip().splitlines()[0][:80] if entry.content.strip() else ""
+                tag = f" ({entry.source})" if entry.source else ""
+                lines.append(f"  • **{entry.key}**{tag} — {preview}")
+            lines.append("")
+            lines.append(f"_{len(entries)} key-value memories_")
+        elif not agents_found:
             return CommandResult(
                 success=True,
                 message="No memories stored yet.\n"
-                "Use `/remember <text>` or `/memory save <key> <content>` to create one.",
+                "Use `/remember` to distill conversation history, or `/memory save <key> <content>` to save directly.",
             )
 
-        lines = ["**Persisted Memories:**", ""]
-        for entry in entries:
-            preview = entry.content.strip().splitlines()[0][:80] if entry.content.strip() else ""
-            tag = f" ({entry.source})" if entry.source else ""
-            lines.append(f"  • **{entry.key}**{tag} — {preview}")
-        lines.append("")
-        lines.append(f"_{len(entries)} total memories_")
+        return CommandResult(success=True, message="\n".join(lines).strip())
 
-        return CommandResult(success=True, message="\n".join(lines))
+    def _search_memories(self, store: "MemoryStore", query: str) -> CommandResult:
+        """Search across active AGENTS.md files and MemoryStore entries."""
+        if not query:
+            return CommandResult(success=False, message="Usage: /memory search <query>")
+
+        q_lower = query.lower()
+        results: list[str] = []
+
+        # Search AGENTS.md files
+        from dcoder.memory.registry import MemoryRegistry
+
+        try:
+            paths = MemoryRegistry.get_instance().get_memory_paths_for_scope("auto")
+            for path in paths:
+                if path.is_file():
+                    content = path.read_text(encoding="utf-8")
+                    matching_lines = [
+                        line.strip()
+                        for line in content.splitlines()
+                        if q_lower in line.lower()
+                    ]
+                    if matching_lines:
+                        results.append(f"📄 **{path}**:")
+                        for line in matching_lines[:5]:
+                            results.append(f"   • {line}")
+                        if len(matching_lines) > 5:
+                            results.append(f"   *... and {len(matching_lines) - 5} more matches*")
+        except Exception:
+            pass
+
+        # Search MemoryStore entries
+        for entry in store.list_all():
+            if q_lower in entry.key.lower() or q_lower in entry.content.lower():
+                preview = entry.content.strip().splitlines()[0][:80] if entry.content.strip() else ""
+                results.append(f"📌 **{entry.key}** ({entry.source}) — {preview}")
+
+        if not results:
+            return CommandResult(
+                success=True,
+                message=f"No memories found matching query `{query}`.",
+            )
+
+        output = ["**Memory Search Results:**", ""] + results
+        return CommandResult(success=True, message="\n".join(output))
 
     def _get_memory(self, store: "MemoryStore", key: str) -> CommandResult:
         entry = store.get(key)
@@ -205,13 +266,15 @@ class MemoryHandler(BaseCommandHandler):
             success=True,
             message=(
                 "**Usage:**\n"
-                "  `/memory show`           — list all memories\n"
-                "  `/memory get <key>`      — view a specific memory\n"
-                "  `/memory save <key> <text>` — save a memory\n"
-                "  `/memory delete <key>`   — delete a memory\n"
-                "  `/memory clear`          — delete all memories\n"
-                "  `/remember`              — extract learnings from conversation\n"
-                "  `/remember <text>`       — save text as a memory"
+                "  `/memory`                        — extract learnings from conversation\n"
+                "  `/memory show`                   — list active memories & AGENTS.md\n"
+                "  `/memory search <query>`         — search persisted memories\n"
+                "  `/memory get <key>`              — view a specific memory\n"
+                "  `/memory save <key> <text>`      — save a memory directly\n"
+                "  `/memory delete <key>`           — delete a memory\n"
+                "  `/memory clear`                  — delete all stored memories\n"
+                "  `/remember`                      — extract learnings from conversation\n"
+                "  `/remember <instruction>`        — extract learnings with explicit focus"
             ),
         )
 

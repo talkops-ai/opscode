@@ -53,12 +53,14 @@ Scrollbar:hover {
 
 /* ── Diff lines ──────────────────────────────────────── */
 
-.diff-line-added {
-    background: $plan-add;
+.diff-line-added, .diff-added {
+    background: #1D2D20;
+    color: #9ECE6A;
 }
 
-.diff-line-removed {
-    background: $plan-destroy;
+.diff-line-removed, .diff-removed {
+    background: #2D2030;
+    color: #F7768E;
 }
 
 .diff-line-hunk {
@@ -214,9 +216,6 @@ ModelSelector, ThreadSelector, MCPViewer {
 /* ── Sub-agent panel ─────────────────────────────────── */
 
 SubagentPanel {
-    padding: 0 1;
-    margin: 0 0 0 2;
-    border-left: tall $primary;
     color: $foreground;
 }
 

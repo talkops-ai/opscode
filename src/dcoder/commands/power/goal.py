@@ -74,16 +74,22 @@ class GoalState:
     def is_actionable(self) -> bool:
         return self.objective is not None and self.status in {"active", "blocked"}
 
-    def grader_display_values(self) -> tuple[str, str]:
+    def grader_display_values(self, startup_model: str = "") -> tuple[str, str]:
         """Return display strings for the shared grader model and iteration cap.
 
-        Reference: app.py L10399-L10411.
+        Reference: app.py L12041-L12056.
         """
-        model = self.rubric_model or "current chat model"
+        if self.rubric_model:
+            model = self.rubric_model
+        elif startup_model:
+            model = f"startup chat model ({startup_model})"
+        else:
+            model = "startup chat model"
+
         iterations = (
             str(self.rubric_max_iterations)
             if self.rubric_max_iterations is not None
-            else "SDK default"
+            else "3 (SDK default)"
         )
         return model, iterations
 

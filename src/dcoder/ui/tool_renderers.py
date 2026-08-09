@@ -9,6 +9,7 @@ from dcoder.file_ops import build_approval_preview, format_display_path
 from dcoder.ui.tool_widgets import (
     EditFileApprovalWidget,
     GenericApprovalWidget,
+    TaskApprovalWidget,
     WriteFileApprovalWidget,
     format_display_content,
 )
@@ -86,7 +87,7 @@ class TaskRenderer(ToolRenderer):
         tool_args: dict[str, Any],
         assistant_id: str | None = None,
     ) -> tuple[type[ToolApprovalWidget], dict[str, Any]]:
-        return GenericApprovalWidget, {}
+        return TaskApprovalWidget, tool_args
 
 
 class DeleteFileRenderer(ToolRenderer):

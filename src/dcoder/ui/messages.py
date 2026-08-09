@@ -3575,27 +3575,43 @@ class SkillMessage(Static):
     }
     """
 
-    def __init__(self, name: str, content: str, source: str = "workspace") -> None:
-        self._skill_name = name
-        self._content = content
+    def __init__(
+        self,
+        name: str = "",
+        content: str = "",
+        source: str = "built-in",
+        skill_name: str | None = None,
+        description: str = "",
+        body: str = "",
+        args: str = "",
+    ) -> None:
+        self._skill_name = skill_name or name or "skill"
+        self._content = body or content
+        self._description = description
         self._source = source
+        self._args = args
         self._expanded = False
 
-        display = Text(f"● Skill Loaded: {name} ", style="bold green")
-        display.append(f"(source: {source})", style="dim italic")
-        display.append(f"\n  ⎿ {content[:100]}...", style="dim")
+        display = self._build_display()
         super().__init__(display)
+
+    def _build_display(self) -> Text:
+        display = Text(f"│ / skill:{self._skill_name} ", style="bold magenta")
+        display.append(f"[{self._source}]\n", style="dim cyan")
+        desc = self._description or self._content[:150]
+        if desc:
+            display.append(f"  {desc.strip()}\n", style="dim white")
+        if self._expanded and self._content:
+            display.append(f"\n{self._content}", style="dim")
+        elif len(self._content) > 150:
+            lines_count = len(self._content.splitlines())
+            display.append(f"  ... {lines_count} lines - click to expand", style="dim italic yellow")
+        return display
 
     def on_click(self) -> None:
         """Toggle between truncated summary and full content view."""
         self._expanded = not self._expanded
-        display = Text(f"● Skill Loaded: {self._skill_name} ", style="bold green")
-        display.append(f"(source: {self._source})", style="dim italic")
-        if self._expanded:
-            display.append(f"\n{self._content}", style="dim")
-        else:
-            display.append(f"\n  ⎿ {self._content[:100]}...", style="dim")
-        self.update(display)
+        self.update(self._build_display())
 
 class ErrorMessage(Static):
     """An error message widget matching dcode styling."""
@@ -3702,6 +3718,10 @@ class SystemMessage(Static):
             content = _markdown_to_content(text, width, console)
             self._markdown_cache = (width, content)
         return self._markdown_cache[1]
+
+
+AppMessage = SystemMessage
+
 
 class MessageList(VerticalScroll):
     """Scrollable list of conversation messages with auto-scroll lock controls."""

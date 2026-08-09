@@ -37,8 +37,8 @@ class TestParseArgs:
         assert args.prompt == "deploy vpc"
 
     def test_model_flag(self):
-        """-m anthropic:claude → model parsed."""
-        with patch("sys.argv", ["dcoder", "-m", "anthropic:claude-3"]):
+        """-M anthropic:claude → model parsed."""
+        with patch("sys.argv", ["dcoder", "-M", "anthropic:claude-3"]):
             args = parse_args()
         assert args.model == "anthropic:claude-3"
 

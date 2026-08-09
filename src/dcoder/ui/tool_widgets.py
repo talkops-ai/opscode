@@ -231,3 +231,39 @@ class EditFileApprovalWidget(ToolApprovalWidget):
         if len(lines) > _MAX_PREVIEW_LINES:
             remaining = len(lines) - _MAX_PREVIEW_LINES
             yield Static(Content.styled(f"... ({remaining} more lines)", "dim"))
+
+
+class TaskApprovalWidget(ToolApprovalWidget):
+    """Approval widget for task tool call (subagent dispatch)."""
+
+    def compose(self) -> ComposeResult:
+        subagent_type = (
+            self.data.get("subagent_type")
+            or self.data.get("agent_name")
+            or self.data.get("subagent")
+            or "general-purpose"
+        )
+        description = (
+            self.data.get("description")
+            or self.data.get("prompt")
+            or self.data.get("task")
+            or "N/A"
+        )
+
+        warning_msg = "Subagent will have access to file operations and shell commands"
+        separator = "─" * 40
+
+        yield Static(
+            Content.from_markup("Subagent Type: [bold]$sub[/bold]\n", sub=subagent_type),
+            classes="task-subagent-type",
+        )
+        yield Static(
+            Content.styled(f"⚠  {warning_msg}  ⚠\n", "yellow"),
+            classes="task-warning",
+        )
+        yield Static(
+            Content.from_markup("Task Instructions:\n[dim]$sep[/dim]", sep=separator),
+            classes="task-instructions-header",
+        )
+        yield Static(description, classes="task-instructions-body")
+

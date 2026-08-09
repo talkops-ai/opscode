@@ -1,122 +1,97 @@
-"""Unit tests for AutoModeHITLMiddleware — classifier-backed approval policy."""
+"""Unit tests for AutoModeHITLMiddleware fast-path and classifier logic."""
 
-from unittest.mock import AsyncMock, MagicMock
+from __future__ import annotations
 
-import pytest
-from langchain_core.messages import AIMessage
+from pathlib import Path
+from unittest.mock import MagicMock
 
-from dcoder.middleware.auto_mode import (
-    AutoModeHITLMiddleware,
-    USER_PROMPT_METADATA_KEY,
-    user_prompt_metadata,
+from dcoder.middleware.auto_mode_hitl import (
+    AutoDecision,
+    AutoDecisionBatch,
+    AutoDecisionCategory,
+    _deterministic_allow,
+    _fixed_repo_command_allowed,
+    _is_sensitive_write_path,
+    _routine_write_allowed,
+    mcp_tool_is_coherently_read_only,
+    sanitize_auto_reason,
 )
 
 
-class TestUserPromptMetadata:
-    """Tests for the user_prompt_metadata helper."""
+def test_mcp_tool_is_coherently_read_only():
+    tool_read_only = MagicMock()
+    tool_read_only.metadata = {"readOnlyHint": True, "destructiveHint": False}
+    assert mcp_tool_is_coherently_read_only(tool_read_only)
 
-    def test_basic_metadata(self):
-        meta = user_prompt_metadata("hello world")
-        assert meta["literal_user_text"] == "hello world"
-        assert meta["referenced_paths"] == []
-        assert "turn_id" in meta
+    tool_destructive = MagicMock()
+    tool_destructive.metadata = {"readOnlyHint": True, "destructiveHint": True}
+    assert not mcp_tool_is_coherently_read_only(tool_destructive)
 
-    def test_with_paths_and_turn_id(self):
-        meta = user_prompt_metadata(
-            "fix this",
-            referenced_paths=["/src/foo.py", "/src/bar.py"],
-            turn_id="turn-42",
-        )
-        assert meta["referenced_paths"] == ["/src/foo.py", "/src/bar.py"]
-        assert meta["turn_id"] == "turn-42"
-
-    def test_auto_generates_turn_id(self):
-        meta = user_prompt_metadata("test")
-        assert meta["turn_id"] is not None
-        assert len(meta["turn_id"]) > 0
+    tool_no_metadata = MagicMock()
+    tool_no_metadata.metadata = None
+    assert not mcp_tool_is_coherently_read_only(tool_no_metadata)
 
 
-class TestAutoModeHITLMiddleware:
-    """Tests for the AutoModeHITLMiddleware."""
+def test_is_sensitive_write_path(tmp_path: Path):
+    root = tmp_path / "repo"
+    root.mkdir()
 
-    def test_init_default_empty_interrupt_on(self):
-        middleware = AutoModeHITLMiddleware()
-        assert middleware.interrupt_on == {}
+    safe_file = root / "src" / "main.py"
+    assert not _is_sensitive_write_path(root, safe_file)
 
-    def test_init_with_interrupt_on(self):
-        from typing import Any, cast
-        interrupt_config: dict[str, Any] = {"write_file": True, "delete": True}
-        middleware = AutoModeHITLMiddleware(interrupt_on=interrupt_config)
-        assert "write_file" in middleware.interrupt_on
-        assert "delete" in middleware.interrupt_on
+    git_file = root / ".git" / "config"
+    assert _is_sensitive_write_path(root, git_file)
 
-    def test_init_with_shell_allow_list(self):
-        middleware = AutoModeHITLMiddleware(
-            interrupt_on={"execute": True},
-            shell_allow_list=["ls", "cat"],
-        )
-        assert middleware._shell_allow_list == ["ls", "cat"]
+    env_file = root / ".env"
+    assert _is_sensitive_write_path(root, env_file)
 
-    @pytest.mark.asyncio
-    async def test_awrap_model_call_no_tool_calls(self):
-        """When the AI response has no tool calls, pass through with decision=None."""
-        middleware = AutoModeHITLMiddleware(interrupt_on={"write_file": True})
+    out_of_bounds = tmp_path / "outside.txt"
+    assert _is_sensitive_write_path(root, out_of_bounds)
 
-        ai_msg = AIMessage(content="Just a text response")
 
-        mock_response = MagicMock()
-        mock_response.result = [ai_msg]
+def test_routine_write_allowed(tmp_path: Path):
+    root = tmp_path / "repo"
+    root.mkdir()
 
-        handler = AsyncMock(return_value=mock_response)
-        request = MagicMock()
+    call_py = {"name": "write_file", "args": {"file_path": "src/app.py"}}
+    assert _routine_write_allowed(root, call_py)
 
-        result = await middleware.awrap_model_call(request, handler)
-        handler.assert_awaited_once_with(request)
-        # Should return ExtendedModelResponse with decision plan cleared
-        from typing import cast, Any
-        ext_result = cast(Any, result)
-        assert ext_result.command.update.get("_auto_decision_plan") is None
+    call_env = {"name": "write_file", "args": {"file_path": ".env"}}
+    assert not _routine_write_allowed(root, call_env)
 
-    @pytest.mark.asyncio
-    async def test_awrap_model_call_with_non_gated_tool_calls(self):
-        """Tool calls not in interrupt_on should pass through normally."""
-        middleware = AutoModeHITLMiddleware(interrupt_on={"write_file": True})
+    call_sh = {"name": "write_file", "args": {"file_path": "scripts/deploy.sh"}}
+    assert not _routine_write_allowed(root, call_sh)
 
-        ai_msg = AIMessage(content="")
-        ai_msg.tool_calls = [{"name": "read_file", "args": {"path": "/foo"}, "id": "tc1"}]
 
-        mock_response = MagicMock()
-        mock_response.result = [ai_msg]
+def test_fixed_repo_command_allowed(tmp_path: Path):
+    root = tmp_path / "repo"
+    root.mkdir()
 
-        handler = AsyncMock(return_value=mock_response)
-        request = MagicMock()
+    assert _fixed_repo_command_allowed("git status", root)
+    assert _fixed_repo_command_allowed("git diff", root)
+    assert _fixed_repo_command_allowed("git log -n 5", root)
 
-        result = await middleware.awrap_model_call(request, handler)
-        # Non-gated calls should return the original response
-        assert result == mock_response
+    assert not _fixed_repo_command_allowed("git push origin main", root)
+    assert not _fixed_repo_command_allowed("rm -rf /", root)
+    assert not _fixed_repo_command_allowed("git status && rm -rf .", root)
 
-    @pytest.mark.asyncio
-    async def test_awrap_model_call_with_gated_tool_calls(self):
-        """Tool calls IN interrupt_on should produce an extended response with decision plan."""
-        middleware = AutoModeHITLMiddleware(interrupt_on={"write_file": True})
 
-        ai_msg = AIMessage(content="")
-        ai_msg.tool_calls = [
-            {"name": "write_file", "args": {"path": "/foo"}, "id": "tc1"},
-            {"name": "read_file", "args": {"path": "/bar"}, "id": "tc2"},
-        ]
+def test_sanitize_auto_reason():
+    raw_reason = "Denied: API_KEY=secret12345678 access to http://user:pass@example.com/api"
+    sanitized = sanitize_auto_reason(raw_reason, known_secrets=["secret12345678"])
+    assert "secret12345678" not in sanitized
+    assert "[redacted]" in sanitized
 
-        mock_response = MagicMock()
-        mock_response.result = [ai_msg]
 
-        handler = AsyncMock(return_value=mock_response)
-        request = MagicMock()
+def test_auto_decision_models():
+    decision = AutoDecision(
+        tool_call_id="call-1",
+        decision="deny",
+        category=AutoDecisionCategory.DESTRUCTIVE_ACTION,
+        reason="Action attempts to modify protected file .env",
+    )
+    assert decision.decision == "deny"
+    assert decision.category == AutoDecisionCategory.DESTRUCTIVE_ACTION
 
-        result = await middleware.awrap_model_call(request, handler)
-        # Should return ExtendedModelResponse
-        assert hasattr(result, "command")
-        from typing import cast, Any
-        ext_result = cast(Any, result)
-        decision_plan = ext_result.command.update.get("_auto_decision_plan")
-        assert decision_plan is not None
-        assert decision_plan["gated_calls_count"] == 1
+    batch = AutoDecisionBatch(decisions=[decision])
+    assert len(batch.decisions) == 1
