@@ -1,0 +1,8 @@
+{
+    "mcpServers": {
+        "opentofu-mcp-server": {
+            "transport": "streamable-http",
+            "url": "https://mcp.opentofu.org/mcp"
+        }
+    }
+}

@@ -31,3 +31,20 @@ def test_tool_filter_middleware_blocks_unauthorized_call():
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
     assert "Tool call rejected" in result.content
+
+
+def test_tool_filter_middleware_alias_expansion():
+    middleware = ToolFilterMiddleware(allowed_patterns=["Read", "Write", "Edit", "dir_list", "search_*", "get_*"])
+
+    assert middleware.is_tool_allowed("read_file") is True
+    assert middleware.is_tool_allowed("view_file") is True
+    assert middleware.is_tool_allowed("write_to_file") is True
+    assert middleware.is_tool_allowed("replace_file_content") is True
+    assert middleware.is_tool_allowed("multi_replace_file_content") is True
+    assert middleware.is_tool_allowed("dir_list") is True
+    assert middleware.is_tool_allowed("search_providers") is True
+    assert middleware.is_tool_allowed("get_provider_schema") is True
+    assert middleware.is_tool_allowed("search_resources") is True
+    assert middleware.is_tool_allowed("get_resource_schema") is True
+    assert middleware.is_tool_allowed("run_command") is False
+

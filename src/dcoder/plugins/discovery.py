@@ -22,6 +22,7 @@ from dcoder.plugins.marketplace import (
     redact_urls_in_text,
 )
 from dcoder.plugins.models import (
+    InstallScope,
     MarketplacePluginEntry,
     MarketplaceRecord,
     PluginDiscoveryResult,
@@ -35,13 +36,17 @@ from dcoder.plugins.store import (
     ensure_marketplace_cache_dir,
     ensure_plugin_data_dir,
     get_primary_install_entry,
+    load_all_enabled_plugin_ids,
     load_enabled_plugin_ids,
+    load_local_enabled_plugin_ids,
+    load_project_enabled_plugin_ids,
     load_installed_plugins,
     load_marketplace_records,
     plugin_data_dir,
     remove_marketplace_record,
     save_marketplace_record,
     set_plugin_enabled,
+    set_plugin_enabled_for_scope,
     uninstall_plugin as uninstall_plugin_record,
 )
 
@@ -118,17 +123,40 @@ def _require_installed_plugin(plugin_id: str) -> None:
         raise MarketplaceError(msg)
 
 
-def set_installed_plugin_enabled(plugin_id: str, *, enabled: bool) -> None:
-    """Set the enabled state of an installed plugin."""
-    _require_installed_plugin(plugin_id)
-    set_plugin_enabled(plugin_id, enabled)
+def set_installed_plugin_enabled(
+    plugin_id: str,
+    *,
+    enabled: bool,
+    scope: InstallScope = "user",
+    project_root: Path | None = None,
+) -> None:
+    """Set the enabled state of an installed plugin at the given scope."""
+    if scope != "project":
+        try:
+            _require_installed_plugin(plugin_id)
+        except MarketplaceError:
+            pass
+    set_plugin_enabled_for_scope(
+        plugin_id, enabled, scope=scope, project_root=project_root,
+    )
     if enabled:
         ensure_plugin_data_dir(plugin_id)
 
 
-def uninstall_plugin(plugin_id: str) -> None:
+def uninstall_plugin(
+    plugin_id: str,
+    *,
+    scope: InstallScope | None = None,
+    project_root: Path | None = None,
+) -> None:
     """Uninstall a plugin (disable, clear records, delete orphaned cache)."""
-    uninstall_plugin_record(plugin_id)
+    effective_scope = scope or ("project" if project_root else "user")
+    set_plugin_enabled_for_scope(
+        plugin_id, False, scope=effective_scope, project_root=project_root,
+    )
+    uninstall_plugin_record(
+        plugin_id, scope=scope, project_root=project_root,
+    )
 
 
 def _resolve_marketplace_and_entry(
@@ -154,10 +182,20 @@ def _resolve_marketplace_and_entry(
     return marketplace, entry
 
 
-def install_plugin(plugin_id: str) -> PluginInstance:
-    """Install a marketplace plugin into the versioned cache and enable it."""
+def install_plugin(
+    plugin_id: str,
+    *,
+    scope: InstallScope = "user",
+    project_root: Path | None = None,
+) -> PluginInstance:
+    """Install a marketplace plugin into the versioned cache and enable it.
+
+    Args:
+        plugin_id: Plugin id in ``name@marketplace`` form.
+        scope: Installation scope — ``"user"``, ``"project"``, or ``"local"``.
+        project_root: Required when ``scope`` is ``"project"`` or ``"local"``.
+    """
     load_installed_plugins(strict=True)
-    load_enabled_plugin_ids(strict=True)
     marketplace, entry = _resolve_marketplace_and_entry(plugin_id)
     source_root = materialize_plugin_source(marketplace, entry)
     if source_root is None:
@@ -184,6 +222,8 @@ def install_plugin(plugin_id: str) -> PluginInstance:
         plugin_id,
         source_root,
         version=version,
+        scope=scope,
+        project_root=project_root,
         validate=partial(
             _validate_plugin_copy,
             plugin_id=plugin_id,
@@ -191,7 +231,9 @@ def install_plugin(plugin_id: str) -> PluginInstance:
         ),
     )
 
-    set_plugin_enabled(plugin_id, True)
+    set_plugin_enabled_for_scope(
+        plugin_id, True, scope=scope, project_root=project_root,
+    )
     ensure_plugin_data_dir(plugin_id)
 
     instance, warnings = _plugin_from_install_path(
@@ -202,7 +244,9 @@ def install_plugin(plugin_id: str) -> PluginInstance:
     )
     if instance is None:
         detail = "; ".join(warnings)
-        uninstall_plugin_record(plugin_id)
+        uninstall_plugin_record(
+            plugin_id, scope=scope, project_root=project_root,
+        )
         msg = f"Installed {plugin_id} but failed to load from cache: {detail}"
         raise MarketplaceError(msg)
     return instance
@@ -257,9 +301,14 @@ def _plugin_from_install_path(
     return instance, inventory.warnings
 
 
-def discover_plugins() -> PluginDiscoveryResult:
-    """Discover enabled marketplace plugins from their install cache paths."""
-    enabled = load_enabled_plugin_ids()
+def discover_plugins(
+    project_root: Path | None = None,
+) -> PluginDiscoveryResult:
+    """Discover enabled marketplace plugins from their install cache paths.
+
+    Uses merged enablement across user + project + local scopes.
+    """
+    enabled = load_all_enabled_plugin_ids(project_root=project_root)
     plugins: list[PluginInstance] = []
     warnings: list[str] = []
 
@@ -270,24 +319,37 @@ def discover_plugins() -> PluginDiscoveryResult:
             warnings.append(f"Ignoring invalid plugin id {plugin_id!r}")
             continue
         entry = get_primary_install_entry(plugin_id)
-        if entry is None:
-            warnings.append(
-                f"Plugin {plugin_id} is enabled but not installed "
-                "(missing installed_plugins.json entry); run install to fix this"
-            )
-            continue
+        needs_install = entry is None
+        if entry is not None:
+            root = Path(entry.install_path)
+            try:
+                if not root.is_dir():
+                    needs_install = True
+            except (OSError, RuntimeError):
+                needs_install = True
+
+        if needs_install:
+            try:
+                scope: InstallScope = "user"
+                if project_root:
+                    if plugin_id in load_local_enabled_plugin_ids(project_root):
+                        scope = "local"
+                    elif plugin_id in load_project_enabled_plugin_ids(project_root):
+                        scope = "project"
+                instance = install_plugin(
+                    plugin_id, scope=scope, project_root=project_root
+                )
+                if instance is not None:
+                    plugins.append(instance)
+                continue
+            except Exception as exc:
+                warnings.append(
+                    f"Plugin {plugin_id} is enabled but auto-install failed: {exc}"
+                )
+                continue
+
+        assert entry is not None
         root = Path(entry.install_path)
-        try:
-            root_exists = root.is_dir()
-        except (OSError, RuntimeError) as exc:
-            warnings.append(f"Plugin {plugin_id} cache could not be inspected: {exc}")
-            continue
-        if not root_exists:
-            warnings.append(
-                f"Plugin {plugin_id} cache miss at {entry.install_path}; "
-                "re-run install to refresh"
-            )
-            continue
         try:
             plugin, plugin_warnings = _plugin_from_install_path(
                 plugin_id=plugin_id,
@@ -305,10 +367,12 @@ def discover_plugins() -> PluginDiscoveryResult:
     return PluginDiscoveryResult(plugins=tuple(plugins), warnings=tuple(warnings))
 
 
-def list_available_plugins() -> tuple[tuple[str, str, bool], ...]:
+def list_available_plugins(
+    project_root: Path | None = None,
+) -> tuple[tuple[str, str, bool], ...]:
     """List plugins from configured marketplaces."""
-    records = load_marketplace_records()
-    enabled = load_enabled_plugin_ids()
+    records = load_marketplace_records(project_root=project_root)
+    enabled = load_all_enabled_plugin_ids(project_root=project_root)
     rows: list[tuple[str, str, bool]] = []
     for name, record in sorted(records.items()):
         try:

@@ -28,6 +28,8 @@ from dcoder.middleware.headless_mcp_guard import (
 from dcoder.middleware.shell_allow_list import ShellAllowListMiddleware
 from dcoder.middleware.cost_tracking import CostTrackingMiddleware, CostState
 from dcoder.middleware.auto_mode import AutoModeHITLMiddleware
+from dcoder.middleware.subagents import SubagentsMiddleware
+from dcoder.middleware.unified_system_message import UnifiedSystemMessageMiddleware, unify_system_message
 
 # Type-only imports so checkers see proper class types for lazy-loaded names.
 if TYPE_CHECKING:
@@ -74,6 +76,9 @@ __all__ = [
     "mcp_tool_is_coherently_read_only",
     "ShellAllowListMiddleware",
     "AutoModeHITLMiddleware",
+    "SubagentsMiddleware",
     "GoalCriteriaMiddleware",
     "ReliableRubricMiddleware",
+    "UnifiedSystemMessageMiddleware",
+    "unify_system_message",
 ]

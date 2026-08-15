@@ -195,6 +195,7 @@ class Settings:
     verbose_output: bool = False
     show_turn_duration: bool = True
     auto_compact: bool = False
+    auto_update: bool = True
     
     @property
     def has_openai(self) -> bool:
@@ -374,14 +375,23 @@ class Settings:
         d = self.get_user_skills_dir(agent_name)
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    @property
+    def effective_project_root(self) -> Path | None:
+        """Return project_root if set, or dynamically search up for project root markers."""
+        if self.project_root is not None:
+            return self.project_root
+        return _find_project_root()
         
     def get_project_skills_dir(self) -> Path | None:
-        if not self.project_root:
+        root = self.effective_project_root
+        if not root:
             return None
-        return paths.project_skills_dir(self.project_root)
+        return paths.project_skills_dir(root)
         
     def ensure_project_skills_dir(self) -> Path | None:
-        if not self.project_root:
+        root = self.effective_project_root
+        if not root:
             return None
         d = self.get_project_skills_dir()
         if d:
@@ -393,19 +403,21 @@ class Settings:
         return paths.user_agents_dir(name)
         
     def get_project_agents_dir(self) -> Path | None:
-        if not self.project_root:
+        root = self.effective_project_root
+        if not root:
             return None
-        return paths.project_agents_dir(self.project_root)
+        return paths.project_agents_dir(root)
         
     def get_user_agent_md_path(self, agent_name: str | None = None) -> Path:
         name = agent_name or self.assistant_id or paths.DEFAULT_AGENT_NAME
         return paths.user_agent_md(name)
         
     def get_project_agent_md_path(self) -> list[Path]:
-        if not self.project_root:
+        root = self.effective_project_root
+        if not root:
             return []
         result = []
-        for candidate in paths.project_agent_md_paths(self.project_root):
+        for candidate in paths.project_agent_md_paths(root):
             if candidate.is_file():
                 result.append(candidate)
         return result

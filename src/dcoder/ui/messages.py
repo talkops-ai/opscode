@@ -1529,7 +1529,7 @@ class ToolCallMessage(Vertical):
         """
         if isinstance(item, dict):
             return str(item.get("content", str(item)))
-        return str(item)
+        return item
 
     def _parse_todo_items(self, output: str) -> list | None:  # noqa: PLR6301  # Grouped as method for widget cohesion
         """Parse todo items from output.
@@ -3746,9 +3746,9 @@ class MessageList(VerticalScroll):
         """Suspend auto-scroll when user manually scrolls up."""
         self._auto_scroll_locked = False
 
-    def mount_inline_prompt(self, widget: Widget) -> None:
+    async def mount_inline_prompt(self, widget: Widget) -> None:
         """Mount an inline prompt widget into the message transcript area."""
-        self.mount(widget)
+        await self.mount(widget)
         if self._auto_scroll_locked:
             self._scroll_to_end()
 

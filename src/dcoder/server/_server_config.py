@@ -58,6 +58,16 @@ def _read_env_optional_bool(suffix: str) -> bool | None:
     return raw.lower() == "true"
 
 
+def _read_env_allow_fs_tools() -> list[str] | None:
+    env_name = f"{SERVER_ENV_PREFIX}ALLOW_FS_TOOLS"
+    if env_name not in os.environ:
+        return None
+    raw = _read_env_json("ALLOW_FS_TOOLS")
+    if isinstance(raw, list) and all(isinstance(x, str) for x in raw):
+        return raw
+    return None
+
+
 def _resolve_enable_interpreter(
     enable_interpreter: bool | None, sandbox_type: str | None
 ) -> bool:
@@ -86,6 +96,7 @@ class ServerConfig:
 
     model: str | None = None
     model_params: dict[str, Any] | None = None
+    profile_override: dict[str, Any] | None = None
     assistant_id: str = DEFAULT_ASSISTANT_ID
     system_prompt: str | None = None
     auto_approve: bool = False
@@ -99,6 +110,8 @@ class ServerConfig:
     enable_interpreter: bool = True
     interpreter_ptc: str | list[str] | None = "safe"
     interpreter_ptc_acknowledge_unsafe: bool = False
+    allow_fs_tools: list[str] | None = None
+    recursion_limit: int | None = None
     user_langchain_project: str | None = "dcoder"
     rubric_model: str | None = None
     rubric_max_iterations: int | None = None
@@ -131,6 +144,9 @@ class ServerConfig:
             "MODEL_PARAMS": (
                 json.dumps(self.model_params) if self.model_params is not None else None
             ),
+            "PROFILE_OVERRIDE": (
+                json.dumps(self.profile_override) if self.profile_override is not None else None
+            ),
             "ASSISTANT_ID": self.assistant_id,
             "SYSTEM_PROMPT": self.system_prompt,
             "AUTO_APPROVE": str(self.auto_approve).lower(),
@@ -154,6 +170,16 @@ class ServerConfig:
             "INTERPRETER_PTC_ACKNOWLEDGE_UNSAFE": str(
                 self.interpreter_ptc_acknowledge_unsafe
             ).lower(),
+            "ALLOW_FS_TOOLS": (
+                json.dumps(self.allow_fs_tools)
+                if self.allow_fs_tools is not None
+                else None
+            ),
+            "RECURSION_LIMIT": (
+                str(self.recursion_limit)
+                if self.recursion_limit is not None
+                else None
+            ),
             "RUBRIC_MODEL": self.rubric_model,
             "RUBRIC_MAX_ITERATIONS": (
                 str(self.rubric_max_iterations)
@@ -180,6 +206,7 @@ class ServerConfig:
         return cls(
             model=_read_env_str("MODEL"),
             model_params=_read_env_json("MODEL_PARAMS"),
+            profile_override=_read_env_json("PROFILE_OVERRIDE"),
             assistant_id=_read_env_str("ASSISTANT_ID") or DEFAULT_ASSISTANT_ID,
             system_prompt=_read_env_str("SYSTEM_PROMPT"),
             auto_approve=_read_env_bool("AUTO_APPROVE"),
@@ -204,6 +231,8 @@ class ServerConfig:
             interpreter_ptc_acknowledge_unsafe=_read_env_bool(
                 "INTERPRETER_PTC_ACKNOWLEDGE_UNSAFE"
             ),
+            allow_fs_tools=_read_env_allow_fs_tools(),
+            recursion_limit=_read_env_int("RECURSION_LIMIT", default=None),
             user_langchain_project=_read_env_str("USER_LANGCHAIN_PROJECT") or "dcoder",
             rubric_model=_read_env_str("RUBRIC_MODEL") or None,
             rubric_max_iterations=_read_env_int("RUBRIC_MAX_ITERATIONS", default=None),
@@ -224,12 +253,17 @@ class ServerConfig:
         *,
         model_name: str | None = None,
         model_params: dict[str, Any] | None = None,
+        profile_override: dict[str, Any] | None = None,
         assistant_id: str = DEFAULT_ASSISTANT_ID,
         auto_approve: bool = False,
         shell_allow_list: list[str] | None = None,
         mcp_config_path: str | None = None,
         no_mcp: bool = False,
         trust_project_mcp: bool | None = None,
+        enable_interpreter: bool | None = None,
+        interpreter_ptc: str | list[str] | None = "safe",
+        allow_fs_tools: str | list[str] | None = None,
+        recursion_limit: int | None = None,
         interactive: bool = True,
         cwd: str | Path | None = None,
     ) -> ServerConfig:
@@ -247,12 +281,26 @@ class ServerConfig:
             except OSError:
                 normalized_mcp = mcp_config_path
 
+        resolved_interpreter = enable_interpreter if enable_interpreter is not None else True
+
+        # Resolve allow_fs_tools: "all" or None collapses to None (unrestricted)
+        resolved_fs_tools: list[str] | None = None
+        if isinstance(allow_fs_tools, list):
+            resolved_fs_tools = allow_fs_tools
+        elif isinstance(allow_fs_tools, str) and allow_fs_tools.strip().lower() != "all":
+            resolved_fs_tools = [x.strip() for x in allow_fs_tools.split(",") if x.strip()]
+
         return cls(
             model=model_name,
             model_params=model_params,
+            profile_override=profile_override,
             assistant_id=assistant_id,
             auto_approve=auto_approve,
             shell_allow_list=shell_allow_list,
+            enable_interpreter=resolved_interpreter,
+            interpreter_ptc=interpreter_ptc,
+            allow_fs_tools=resolved_fs_tools,
+            recursion_limit=recursion_limit,
             interactive=interactive,
             cwd=str(project_context.user_cwd),
             project_root=str(project_context.project_root) if project_context.project_root else None,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from deepagents.backends.protocol import FileInfo, LsResult
 from deepagents.backends.utils import to_posix_path
@@ -176,11 +176,12 @@ class PluginSkillsMiddleware(SkillsMiddleware):
         if "skills_metadata" in state:
             return None
 
-        backend: BackendProtocol = cast("BackendProtocol", self._backend)
+        backend = self._backend
         all_skills: dict[str, sdk_skills.SkillMetadata] = {}
         errors: list[str] = []
 
-        for source_path, _source_label, namespace in zip(
+        active_sources: list[tuple[str, str]] = []
+        for source_path, source_label, namespace in zip(
             self.sources, self.source_labels, self._namespaces, strict=True
         ):
             if namespace is None:
@@ -191,10 +192,20 @@ class PluginSkillsMiddleware(SkillsMiddleware):
                     errors.append(source_error)
             else:
                 source_skills = load_namespaced_skills(backend, source_path, namespace)
+
+            source_has_skills = False
             for skill in source_skills:
                 skill_name = skill["name"]
                 if self._is_skill_allowed(skill_name):
                     all_skills[skill_name] = skill
+                    source_has_skills = True
+
+            if source_has_skills:
+                active_sources.append((source_path, source_label))
+
+        if active_sources:
+            self.sources = [s[0] for s in active_sources]
+            self.source_labels = [s[1] for s in active_sources]
 
         update = sdk_skills.SkillsStateUpdate(skills_metadata=list(all_skills.values()))
         if errors:
@@ -210,4 +221,10 @@ class PluginSkillsMiddleware(SkillsMiddleware):
     ) -> sdk_skills.SkillsStateUpdate | None:
         import asyncio
         return await asyncio.to_thread(self.before_agent, state, runtime, config)
+
+    def modify_request(self, request: Any) -> Any:
+        skills_metadata = getattr(request, "state", {}).get("skills_metadata", [])
+        if not skills_metadata and self._allowed_skills is not None:
+            return request
+        return super().modify_request(request)
 

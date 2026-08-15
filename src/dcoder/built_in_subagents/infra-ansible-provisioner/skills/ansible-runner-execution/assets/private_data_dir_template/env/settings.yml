@@ -1,0 +1,5 @@
+---
+process_isolation: true
+process_isolation_executable: podman
+timeout: 3600
+idle_timeout: 600

@@ -72,7 +72,7 @@ def _parse_stream_item(raw_item: Any) -> tuple[tuple[str, ...], str, Any] | None
             ns = tuple(first) if isinstance(first, (list, tuple)) else ()
             return ns, third, second
         ns = tuple(first) if isinstance(first, (list, tuple)) else ()
-        return ns, str(second) if isinstance(second, str) else "updates", third
+        return ns, second if isinstance(second, str) else "updates", third
     return None
 
 

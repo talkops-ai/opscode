@@ -8,7 +8,13 @@ from dcoder.commands.power.loop import LoopHandler
 from dcoder.commands.power.memory import MemoryHandler
 from dcoder.commands.power.review import ReviewHandler
 from dcoder.commands.power.rubric import RubricHandler
-from dcoder.commands.power.runtime import ReloadHandler, RestartHandler, UpdateHandler
+from dcoder.commands.power.runtime import (
+    AutoUpdateHandler,
+    InstallHandler,
+    ReloadHandler,
+    RestartHandler,
+    UpdateHandler,
+)
 from dcoder.commands.power.skill_creator import SkillCreatorHandler
 from dcoder.commands.power.skill_invoke import SkillInvokeHandler
 from dcoder.commands.power.tasks import TasksHandler
@@ -22,9 +28,11 @@ from dcoder.commands.power.version import VersionHandler
 
 __all__ = [
     "AgentsHandler",
+    "AutoUpdateHandler",
     "BtwHandler",
     "CopyHandler",
     "GoalHandler",
+    "InstallHandler",
     "LoopHandler",
     "MemoryHandler",
     "NotificationsHandler",

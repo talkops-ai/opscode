@@ -66,9 +66,7 @@ def _async_routing_mode(state: object) -> ApprovalMode | None:
 class AsyncApprovalHITLMiddleware(HumanInTheLoopMiddleware[Any, Any, Any]):
     """Stock HITL routing with an async live-mode read after model completion."""
 
-    @property
-    def name(self) -> str:
-        return "HumanInTheLoopMiddleware"
+    name = HumanInTheLoopMiddleware.__name__  # type: ignore[assignment,override] # pyright: ignore[reportAssignmentType,reportIncompatibleMethodOverride]
 
     def __init__(
         self,
@@ -1585,10 +1583,7 @@ class AutoModeHITLMiddleware(HumanInTheLoopMiddleware[AutoModeState, Any, Any]):
 
     state_schema = AutoModeState
 
-    @property
-    def name(self) -> str:
-        """Replace the stock main-agent HITL middleware by name."""
-        return "HumanInTheLoopMiddleware"
+    name = HumanInTheLoopMiddleware.__name__  # type: ignore[assignment,override] # pyright: ignore[reportAssignmentType,reportIncompatibleMethodOverride]
 
     def __init__(
         self,

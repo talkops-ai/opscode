@@ -20,14 +20,14 @@ def test_auto_mode_notice_screen_custom_body():
 
 
 @pytest.mark.asyncio
-async def test_auto_mode_notice_actions():
+async def test_auto_mode_notice_actions(monkeypatch: pytest.MonkeyPatch):
     screen = AutoModeNoticeScreen()
     dismiss_result = []
 
-    def mock_dismiss(result: bool) -> None:
+    def mock_dismiss(result: bool | None = None) -> None:
         dismiss_result.append(result)
 
-    screen.dismiss = mock_dismiss
+    monkeypatch.setattr(screen, "dismiss", mock_dismiss)
 
     screen.action_confirm()
     assert dismiss_result == [True]

@@ -41,8 +41,10 @@ async def test_general_help_returns_categorized_output():
 
     res = await handler.execute(ctx)
     assert res.success is True
-    assert res.message is not None and res.message is not None and "Commands:" in res.message
-    assert res.message is not None and res.message is not None and "Interactive Features:" in res.message
+    assert res.message is not None and "Commands:" in res.message
+    assert res.message is not None and "Interactive Features:  \n" in res.message
+    assert res.message is not None and "Ctrl+X          Open prompt in external editor  \n" in res.message
+    assert res.message is not None and "Ctrl+N          Review pending notifications  \n" in res.message
 
 
 @pytest.mark.asyncio

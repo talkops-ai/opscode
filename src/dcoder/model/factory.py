@@ -44,17 +44,37 @@ class ModelResult:
 def detect_provider(model_name: str) -> str | None:
     """Infer provider from model name prefixes."""
     name_lower = model_name.lower()
-    if name_lower.startswith(("claude-", "claude3")):
-        return "anthropic"
-    if name_lower.startswith(("gpt-", "o1-", "o3-", "chatgpt-")):
+    if name_lower.startswith(("gpt-", "o1", "o3", "o4", "chatgpt", "text-davinci")):
         return "openai"
+    if name_lower.startswith(("claude-", "claude", "sonnet", "opus", "haiku")):
+        return "anthropic"
     if name_lower.startswith("gemini"):
         return "google_genai"
     if name_lower.startswith("deepseek"):
         return "deepseek"
     if name_lower.startswith("groq"):
         return "groq"
+    if name_lower.startswith(("mistral", "mixtral")):
+        return "mistralai"
+    if name_lower.startswith("command"):
+        return "cohere"
+    if name_lower.startswith("grok"):
+        return "xai"
+    if name_lower.startswith("sonar"):
+        return "perplexity"
     return None
+
+
+def normalize_model_spec(model_spec: str) -> str:
+    """Normalize a model specifier into `provider:model` format if bare."""
+    if not model_spec:
+        return model_spec
+    if ":" in model_spec:
+        return model_spec
+    provider = detect_provider(model_spec)
+    if provider:
+        return f"{provider}:{model_spec}"
+    return model_spec
 
 
 def _get_default_model_spec() -> str:

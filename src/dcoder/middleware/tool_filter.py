@@ -12,13 +12,36 @@ from dcoder.middleware.registry import register_middleware
 logger = logging.getLogger("dcoder")
 
 
+TOOL_ALIAS_MAP: dict[str, tuple[str, ...]] = {
+    "read": ("read_file", "view_file", "read_url_content"),
+    "write": ("write_to_file",),
+    "edit": ("replace_file_content", "multi_replace_file_content"),
+    "grep": ("grep_search",),
+    "glob": ("dir_list", "file_search"),
+    "bash": ("run_command",),
+    "execute": ("run_command",),
+}
+
+
+def _expand_tool_patterns(patterns: Sequence[str]) -> tuple[str, ...]:
+    expanded: list[str] = []
+    for pattern in patterns:
+        expanded.append(pattern)
+        clean = pattern.strip().lower()
+        if clean in TOOL_ALIAS_MAP:
+            expanded.extend(TOOL_ALIAS_MAP[clean])
+    return tuple(expanded)
+
+
 @register_middleware(name="tool_filter")
 class ToolFilterMiddleware(AgentMiddleware):
     """Filters tool calls against a whitelist of allowed tool patterns (fnmatch format)."""
 
     def __init__(self, allowed_patterns: Sequence[str] | None = None) -> None:
         super().__init__()
-        self._allowed_patterns = tuple(allowed_patterns) if allowed_patterns is not None else ()
+        self._allowed_patterns = (
+            _expand_tool_patterns(allowed_patterns) if allowed_patterns is not None else ()
+        )
 
     def is_tool_allowed(self, tool_name: str) -> bool:
         """Check if a tool name matches any of the allowed patterns."""

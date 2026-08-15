@@ -1,0 +1,4 @@
+# Sudoers drop-in configuration for {{ sudo_user | default('automation') }}
+# Managed by Ansible - do not edit manually
+
+{{ sudo_user | default('automation') }} ALL=(ALL) NOPASSWD: {% for cmd in allowed_sudo_commands %}{{ cmd }}{% if not loop.last %}, {% endif %}{% endfor %}

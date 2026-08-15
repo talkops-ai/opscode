@@ -183,6 +183,11 @@ def _subagent_cli_middleware(
     shell_allow_list: list[str] | None = None,
     interrupt_on: dict[str, Any] | None = None,
     worktree_root: str | Path | None = None,
+    subagent_path: str | None = None,
+    custom_middleware: Sequence[Any] | None = None,
+    mcp_manager: Any | None = None,
+    mcp_config: dict[str, Any] | None = None,
+    mcp_tools: list[Any] | None = None,
 ) -> list[Any]:
     from deepagents.backends import FilesystemBackend
     from dcoder.middleware.configurable_model import ConfigurableModelMiddleware
@@ -218,15 +223,50 @@ def _subagent_cli_middleware(
         ServerHooksMiddleware(
             cwd=subagent_cwd,
             emit_stop=False,
+            mcp_tools=mcp_tools or (),
         )
     )
+
+    if mcp_manager is not None:
+        from dcoder.mcp.middleware import MCPContextMiddleware
+        middleware.append(MCPContextMiddleware(session_manager=mcp_manager, mcp_config=mcp_config))
 
     # Tool Filtering Proxy Middleware
     if allowed_tools:
         middleware.append(ToolFilterMiddleware(allowed_patterns=allowed_tools))
 
     # Scoped Skill Middleware for Subagent
-    skill_sources = SkillRegistry.get_instance().get_sources_for_middleware()
+    skill_sources: list[tuple[str, ...]] = []
+    if subagent_path:
+        p = Path(subagent_path)
+        bundle_dir = p.parent.parent if p.parent.name == "agents" else p.parent
+        sub_skills_dir = bundle_dir / "skills"
+        if sub_skills_dir.exists() and sub_skills_dir.is_dir():
+            skill_sources.append((str(sub_skills_dir), f"Subagent ({subagent_name})"))
+
+    global_sources = SkillRegistry.get_instance().get_sources_for_middleware()
+    if allowed_skills is not None:
+        import fnmatch
+        from dcoder.middleware.skills import discover_skill_dirs
+        backend_fs = FilesystemBackend(virtual_mode=False)
+        for src in global_sources:
+            src_path = src[0]
+            try:
+                found_dirs = discover_skill_dirs(backend_fs, src_path)
+                for dir_path, _ in found_dirs:
+                    skill_name = Path(dir_path).name
+                    if any(
+                        fnmatch.fnmatch(skill_name, pat)
+                        or fnmatch.fnmatch(skill_name.lower(), pat.lower())
+                        for pat in allowed_skills
+                    ):
+                        skill_sources.append(src)
+                        break
+            except Exception as exc:
+                logger.debug("Skill discovery failed for source %s: %s", src_path, exc)
+    elif not skill_sources:
+        skill_sources.extend(global_sources)
+
     if skill_sources:
         middleware.append(
             PluginSkillsMiddleware(
@@ -236,6 +276,10 @@ def _subagent_cli_middleware(
             )
         )
 
+    if custom_middleware:
+        for extra_mw in custom_middleware:
+            middleware.append(extra_mw)
+
     # Branch Memory Store for subagent execution isolation
     branch_store = BranchMemoryStore(subagent_name=subagent_name)
     memory_sources = [
@@ -243,6 +287,8 @@ def _subagent_cli_middleware(
         str(settings.get_user_agent_md_path(assistant_id)),
     ]
     middleware.append(ManagedMemoryGuardMiddleware(memory_sources))
+    from dcoder.middleware.unified_system_message import UnifiedSystemMessageMiddleware
+    middleware.append(UnifiedSystemMessageMiddleware())
     return middleware
 
 
@@ -283,7 +329,7 @@ def _resolve_ptc_option(
             if isinstance(name, str):
                 live_names.append(name)
         elif isinstance(candidate, dict):
-            raw_name = cast("dict[str, Any]", candidate).get("name")
+            raw_name = candidate.get("name")
             if isinstance(raw_name, str):
                 live_names.append(raw_name)
         else:
@@ -537,7 +583,7 @@ def create_dcoder_agent(
     # Memory Middleware & Guard
     from dcoder.memory import MemoryRegistry
     memory_sources = MemoryRegistry.get_instance().get_all_memory_sources(assistant_id)
-    memory_sources_str = [str(s) for s in memory_sources]
+    memory_sources_str = [s for s in memory_sources]
     if memory_sources_str:
         agent_middleware.append(
             MemoryMiddleware(
@@ -551,7 +597,7 @@ def create_dcoder_agent(
 
     # Plugin Skills Middleware
     from dcoder.skills import SkillRegistry
-    SkillRegistry.get_instance().discover_skills()
+    SkillRegistry.get_instance().discover_skills(force=True)
     skill_sources = SkillRegistry.get_instance().get_sources_for_middleware()
     if skill_sources:
         agent_middleware.append(
@@ -797,6 +843,33 @@ def create_dcoder_agent(
         if name:
             subagent_by_name[name] = meta
 
+    # Auto-load project-local marketplace plugins (no install/enable needed)
+    from dcoder.plugins.project_plugins import load_project_plugins
+
+    project_plugin_result = load_project_plugins(effective_cwd)
+    for warning in project_plugin_result.warnings:
+        logger.warning("Project plugin: %s", warning)
+
+    # Agent-plugin subagents → merge into subagent registry
+    for meta in project_plugin_result.subagent_metas:
+        name = meta.get("name")
+        if name:
+            subagent_by_name[name] = meta
+
+    # Non-agent plugin MCP → merge into main MCP session
+    for mcp_config in project_plugin_result.main_mcp_configs:
+        servers = mcp_config.get("mcpServers", {})
+        if servers and mcp_tools is not None:
+            try:
+                from dcoder.mcp.session_manager import MCPSessionManager
+                extra_manager = MCPSessionManager(mcp_config)
+                extra_tools = run_sync(extra_manager.connect_all(trust_project=True))
+                if extra_tools:
+                    mcp_tools = list(mcp_tools) + list(extra_tools)
+                    tools_list.extend(extra_tools)
+            except Exception as exc:
+                logger.warning("Could not connect project plugin MCP: %s", exc)
+
     main_tool_descriptions = _get_harness_tool_descriptions(active_model)
         
     subagent_interrupt_on = interrupt_on if (interactive and not auto_approve) else None
@@ -818,10 +891,48 @@ def create_dcoder_agent(
             "system_prompt": subagent_meta.get("system_prompt") or "",
         }
         if model_spec:
-            subagent_dict["model"] = model_spec
+            from dcoder.model.factory import normalize_model_spec
+            subagent_dict["model"] = normalize_model_spec(model_spec)
             
         subagent_name = subagent_meta.get("name") or name
         allow_list = getattr(settings, "shell_allow_list", None) or []
+
+        # Handle subagent embedded MCP configs or files
+        subagent_mcp_tools: list[Any] = []
+        subagent_mcp_config = subagent_meta.get("mcp_config")
+        mcp_files = subagent_meta.get("mcp_files")
+        if not subagent_mcp_config and mcp_files:
+            import json
+            combined_servers: dict[str, Any] = {}
+            for mcp_file_path in mcp_files:
+                p = Path(mcp_file_path)
+                if p.exists() and p.is_file():
+                    try:
+                        raw = json.loads(p.read_text(encoding="utf-8"))
+                        servers = raw.get("mcpServers") or raw.get("mcp_servers") or raw
+                        if isinstance(servers, dict):
+                            combined_servers.update(servers)
+                    except Exception as exc:
+                        logger.warning("Could not parse subagent MCP file %s: %s", p, exc)
+            if combined_servers:
+                subagent_mcp_config = {"mcpServers": combined_servers}
+
+        sub_mcp_manager = None
+        if subagent_mcp_config:
+            from dcoder.mcp.session_manager import MCPSessionManager
+            sub_mcp_manager = MCPSessionManager(subagent_mcp_config)
+            try:
+                sub_tools = run_sync(sub_mcp_manager.connect_all(trust_project=True))
+                if sub_tools:
+                    subagent_mcp_tools.extend(sub_tools)
+            except Exception as exc:
+                logger.warning("Could not connect subagent %s MCP servers: %s", subagent_name, exc)
+
+        if subagent_mcp_tools:
+            subagent_dict["tools"] = subagent_mcp_tools
+
+        subagent_path = subagent_meta.get("path")
+        custom_mw = subagent_meta.get("middleware")
         subagent_middleware = _subagent_cli_middleware(
             has_explicit_model=bool(model_spec),
             assistant_id=assistant_id,
@@ -832,6 +943,11 @@ def create_dcoder_agent(
             shell_allow_list=allow_list if not interactive and allow_list else None,
             interrupt_on=subagent_interrupt_on,
             worktree_root=effective_cwd,
+            subagent_path=str(subagent_path) if subagent_path else None,
+            custom_middleware=custom_mw if isinstance(custom_mw, list) else None,
+            mcp_manager=sub_mcp_manager,
+            mcp_config=subagent_mcp_config,
+            mcp_tools=subagent_mcp_tools,
         )
         if subagent_middleware:
             subagent_dict["middleware"] = subagent_middleware
@@ -860,7 +976,7 @@ def create_dcoder_agent(
             mw_list = subagent_dict["middleware"]
             if isinstance(mw_list, list):
                 mw_list.append(fs_mw)
-        if subagent_interrupt_on is not None:
+        if interrupt_on is not None:
             subagent_dict["interrupt_on"] = {}
 
         compiled_subagents.append(subagent_dict)
@@ -899,19 +1015,30 @@ def create_dcoder_agent(
             "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
             "middleware": gp_middleware,
         }
-        if subagent_interrupt_on is not None:
+        if interrupt_on is not None:
             gp_subagent["interrupt_on"] = {}
 
         compiled_subagents.append(gp_subagent)
 
-    # 7. System prompt is handled via HarnessProfile (base_system_prompt)
-    resolved_system_prompt = None
+    # 7. Wire the base system prompt to the SDK
+    resolved_system_prompt = base_prompt
 
 
     all_subagents: list[Any] = [
         *compiled_subagents,
         *(async_subagents or []),
     ]
+
+    # 8. Wire SubagentsMiddleware — inject subagent catalog into parent
+    from dcoder.middleware.subagents import SubagentsMiddleware
+
+    all_subagent_metas = list(subagent_by_name.values())
+    subagents_middleware = SubagentsMiddleware(subagent_metas=all_subagent_metas)
+    agent_middleware.append(subagents_middleware)
+
+    from dcoder.middleware.unified_system_message import UnifiedSystemMessageMiddleware
+    agent_middleware.append(UnifiedSystemMessageMiddleware())
+
     logger.debug(
         "[HITL_TRACE_DEBUG] Main Agent Middleware Stack: %s",
         [getattr(m, "name", type(m).__name__) for m in agent_middleware],

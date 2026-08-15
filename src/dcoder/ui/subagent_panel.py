@@ -496,6 +496,15 @@ class SubagentPanel(Vertical):
             self._timer.stop()
             self._timer = None
 
+    def pause(self) -> None:
+        """Pause the refresh timer while an approval dialog is visible."""
+        self._stop_timer()
+
+    def resume(self) -> None:
+        """Resume the refresh timer after an approval decision."""
+        if self._any_running():
+            self._ensure_timer()
+
     def _turn_counts(self) -> tuple[int, int, int, int]:
         total = done = failed = cancelled = 0
         for phase in self._phases.values():

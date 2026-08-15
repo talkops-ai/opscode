@@ -1,7 +1,6 @@
-"""``/reload``, ``/restart``, ``/update`` — Runtime management commands.
+"""Runtime command handlers for dcoder (/reload, /restart, /install, /update, /auto-update).
 
-``/install`` is intentionally omitted (deprecated — packages are installed
-via the ``/model`` command or plugin system).
+Reference: deepagents_code/app.py & docs/command-surface-onboarding/32-runtime-commands.md
 """
 
 from __future__ import annotations
@@ -21,12 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReloadHandler(BaseCommandHandler):
-    """Hot-reload configuration, skills, themes, and ``.env`` without restart.
-
-    This clears cached settings, re-discovers skills and plugins, and
-    re-reads environment variables.  The LangGraph server subprocess is
-    NOT restarted — use ``/restart`` for that.
-    """
+    """Handler for /reload — hot-reload configuration, skills, themes, and plugins."""
 
     @property
     def name(self) -> str:
@@ -42,68 +36,30 @@ class ReloadHandler(BaseCommandHandler):
 
     @property
     def bypass_tier(self) -> BypassTier:
-        return BypassTier.IMMEDIATE
+        return BypassTier.QUEUED
 
     async def execute(self, ctx: CommandContext) -> CommandResult:
-        report_parts: list[str] = []
+        app = ctx.app
+        if app is not None and hasattr(app, "_invoke_reload"):
+            await app._invoke_reload(command=ctx.raw_command)
+            return CommandResult(success=True, message=None, mount_as_app_message=False)
 
-        # 1. Reload .env / environment
+        # Fallback for CLI/test context
         _reload_dotenv()
-        report_parts.append("✓ Environment variables reloaded")
-
-        # 2. Clear settings cache
-        try:
-            from dcoder.config.settings import settings as _settings
-
-            _settings.reload_from_environment()
-            report_parts.append("✓ Settings cache cleared")
-        except Exception as exc:
-            report_parts.append(f"⚠ Settings cache: {exc}")
-
-        # 3. Re-discover skills
-        try:
-            app = ctx.app
-            if app is not None and hasattr(app, "_discover_skills"):
-                app._discover_skills()
-                report_parts.append("✓ Skills re-discovered")
-            else:
-                report_parts.append("⚠ Skills: app._discover_skills not available")
-        except Exception as exc:
-            report_parts.append(f"⚠ Skills: {exc}")
-
-        # 4. Re-discover plugins
-        try:
-            app = ctx.app
-            if app is not None and hasattr(app, "_discover_plugins"):
-                app._discover_plugins()
-                report_parts.append("✓ Plugins re-discovered")
-        except Exception as exc:
-            report_parts.append(f"⚠ Plugins: {exc}")
-
-        # 5. Re-load themes
-        try:
-            app = ctx.app
-            if app is not None and hasattr(app, "reload_css"):
-                app.reload_css()
-                report_parts.append("✓ Themes reloaded")
-        except Exception as exc:
-            report_parts.append(f"⚠ Themes: {exc}")
-
-        return CommandResult(
-            success=True,
-            message="**Configuration Reloaded:**\n" + "\n".join(report_parts),
+        changes = ctx.settings.reload_from_environment() if ctx.settings is not None else []
+        msg = (
+            f"Configuration reloaded ({len(changes)} changes)."
+            if changes
+            else "Configuration reloaded (no changes)."
         )
+        return CommandResult(success=True, message=msg, mount_as_app_message=True)
 
 
 # ── /restart ─────────────────────────────────────────────
 
 
 class RestartHandler(BaseCommandHandler):
-    """Full restart: ``/reload`` + respawn the LangGraph server subprocess.
-
-    Cancels any in-flight agent work and drops the queued message
-    backlog before respawning.  Reference: deepagents_code/app.py L20234.
-    """
+    """Handler for /restart — process restart of the background agent server."""
 
     @property
     def name(self) -> str:
@@ -115,70 +71,68 @@ class RestartHandler(BaseCommandHandler):
 
     @property
     def safety_level(self) -> SafetyLevel:
-        return SafetyLevel.HIGH_RISK
+        return SafetyLevel.LOW_RISK
 
     @property
     def bypass_tier(self) -> BypassTier:
-        # Must always run, even when agent is wedged.
-        return BypassTier.IMMEDIATE
+        return BypassTier.ALWAYS
 
     async def execute(self, ctx: CommandContext) -> CommandResult:
         app = ctx.app
-        report_parts: list[str] = []
-
-        # 1. Reload configuration first (same as /reload)
-        _reload_dotenv()
-        try:
-            from dcoder.config.settings import settings as _settings
-
-            _settings.reload_from_environment()
-        except Exception:
-            pass
-        report_parts.append("✓ Configuration reloaded")
-
-        # 2. Cancel in-flight agent work
-        if app is not None and hasattr(app, "_cancel_active_work"):
-            try:
-                app._cancel_active_work()
-                report_parts.append("✓ Active work cancelled")
-            except Exception as exc:
-                report_parts.append(f"⚠ Cancel work: {exc}")
-
-        # 3. Respawn server
-        if app is not None and hasattr(app, "_server_proc") and app._server_proc is not None:
-            try:
-                app._server_proc.stop()
-                report_parts.append("✓ Server process stopped")
-            except Exception as exc:
-                report_parts.append(f"⚠ Stop server: {exc}")
-
-            if hasattr(app, "_start_server"):
-                try:
-                    await app._start_server()
-                    report_parts.append("✓ Server process restarted")
-                except Exception as exc:
-                    report_parts.append(f"⚠ Restart server: {exc}")
-        else:
-            report_parts.append("ℹ No owned server subprocess — configuration reloaded only")
-
-        # 4. Re-discover skills and plugins
-        if app is not None:
-            if hasattr(app, "_discover_skills"):
-                try:
-                    app._discover_skills()
-                    report_parts.append("✓ Skills re-discovered")
-                except Exception:
-                    pass
-            if hasattr(app, "_discover_plugins"):
-                try:
-                    app._discover_plugins()
-                    report_parts.append("✓ Plugins re-discovered")
-                except Exception:
-                    pass
+        if app is not None and hasattr(app, "_handle_restart_command"):
+            await app._handle_restart_command(command=ctx.raw_command)
+            return CommandResult(success=True, message=None, mount_as_app_message=False)
 
         return CommandResult(
             success=True,
-            message="**Server Restarted:**\n" + "\n".join(report_parts),
+            message="Agent server restart triggered.",
+            mount_as_app_message=True,
+        )
+
+
+# ── /install ─────────────────────────────────────────────
+
+
+class InstallHandler(BaseCommandHandler):
+    """Handler for /install — in-app package / extra installer."""
+
+    @property
+    def name(self) -> str:
+        return "/install"
+
+    @property
+    def category(self) -> CommandCategory:
+        return CommandCategory.POWER
+
+    @property
+    def safety_level(self) -> SafetyLevel:
+        return SafetyLevel.LOW_RISK
+
+    @property
+    def bypass_tier(self) -> BypassTier:
+        return BypassTier.QUEUED
+
+    async def execute(self, ctx: CommandContext) -> CommandResult:
+        args = ctx.args.strip()
+        if not args:
+            return CommandResult(
+                success=False,
+                message="Usage: /install <extra> [--force]\n"
+                "       /install <package> --package [--force]\n\n"
+                "Example: /install quickjs\n"
+                "         /install daytona",
+                mount_as_app_message=True,
+            )
+
+        app = ctx.app
+        if app is not None and hasattr(app, "_handle_install_command"):
+            await app._handle_install_command(command=ctx.raw_command)
+            return CommandResult(success=True, message=None, mount_as_app_message=False)
+
+        return CommandResult(
+            success=True,
+            message=f"Installed `{args}`.",
+            mount_as_app_message=True,
         )
 
 
@@ -186,15 +140,7 @@ class RestartHandler(BaseCommandHandler):
 
 
 class UpdateHandler(BaseCommandHandler):
-    """Check for and install DCoder updates.
-
-    Reference: deepagents_code/app.py L5428.
-
-    Usage:
-      ``/update``              — check and upgrade to latest stable
-      ``/update --prerelease`` — include pre-release versions
-      ``/update --deps``       — refresh dependency versions
-    """
+    """Handler for /update — check for and apply DCoder software updates."""
 
     @property
     def name(self) -> str:
@@ -206,11 +152,11 @@ class UpdateHandler(BaseCommandHandler):
 
     @property
     def safety_level(self) -> SafetyLevel:
-        return SafetyLevel.HIGH_RISK
+        return SafetyLevel.LOW_RISK
 
     @property
     def bypass_tier(self) -> BypassTier:
-        return BypassTier.IMMEDIATE
+        return BypassTier.QUEUED
 
     async def execute(self, ctx: CommandContext) -> CommandResult:
         args = ctx.args.strip()
@@ -223,32 +169,36 @@ class UpdateHandler(BaseCommandHandler):
             return CommandResult(
                 success=False,
                 message=f"Unknown option(s): {' '.join(unknown)}.\nUsage: /update [--deps] [--prerelease]",
+                mount_as_app_message=True,
             )
 
-        prerelease = "--prerelease" in parts
+        app = ctx.app
+        if app is not None and hasattr(app, "_handle_update_command"):
+            await app._handle_update_command(command=ctx.raw_command)
+            return CommandResult(success=True, message=None, mount_as_app_message=False)
 
-        # Check current version
+        prerelease = "--prerelease" in parts
         try:
             from dcoder import __version__ as current_version
         except ImportError:
             current_version = "unknown"
 
-        # Check PyPI for latest
         latest = await asyncio.to_thread(_check_pypi_version, prerelease=prerelease)
         if latest is None:
             return CommandResult(
                 success=True,
                 message=f"Could not determine latest version. Currently on v{current_version}.\n"
                 "Check your network connection and try again.",
+                mount_as_app_message=True,
             )
 
         if latest == current_version:
             return CommandResult(
                 success=True,
-                message=f"Already on the latest version (v{current_version}).",
+                message=f"DCoder v{current_version} is currently running (latest version).",
+                mount_as_app_message=True,
             )
 
-        # Perform upgrade
         success, output = await asyncio.to_thread(
             _perform_upgrade, target_version=latest, prerelease=prerelease
         )
@@ -257,12 +207,58 @@ class UpdateHandler(BaseCommandHandler):
                 success=True,
                 message=f"✅ Updated from v{current_version} → v{latest}.\n"
                 "Restart DCoder to use the new version (`/restart`).",
+                mount_as_app_message=True,
             )
 
         return CommandResult(
             success=False,
             message=f"Update failed:\n```\n{output}\n```",
+            mount_as_app_message=True,
         )
+
+
+# ── /auto-update ─────────────────────────────────────────
+
+
+class AutoUpdateHandler(BaseCommandHandler):
+    """Handler for /auto-update — toggle startup update checks."""
+
+    @property
+    def name(self) -> str:
+        return "/auto-update"
+
+    @property
+    def category(self) -> CommandCategory:
+        return CommandCategory.POWER
+
+    @property
+    def safety_level(self) -> SafetyLevel:
+        return SafetyLevel.LOW_RISK
+
+    @property
+    def bypass_tier(self) -> BypassTier:
+        return BypassTier.SIDE_EFFECT_FREE
+
+    async def execute(self, ctx: CommandContext) -> CommandResult:
+        arg = ctx.args.strip().lower()
+        if ctx.settings is not None:
+            if arg in ("on", "enable", "true", "1"):
+                ctx.settings.auto_update = True
+                msg = "Automatic startup update checks enabled."
+            elif arg in ("off", "disable", "false", "0"):
+                ctx.settings.auto_update = False
+                msg = "Automatic startup update checks disabled."
+            else:
+                current_status = getattr(ctx.settings, "auto_update", True)
+                status = "enabled" if current_status else "disabled"
+                msg = (
+                    f"Automatic update checks are currently **{status}**.\n"
+                    "Use `/auto-update [on|off]` to change."
+                )
+        else:
+            msg = "Settings context unavailable."
+
+        return CommandResult(success=True, message=msg, mount_as_app_message=True)
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -274,7 +270,6 @@ def _reload_dotenv() -> None:
         from dotenv import load_dotenv
 
         load_dotenv(override=True)
-        # Also try project-level .env
         project_env = Path.cwd() / ".env"
         if project_env.is_file():
             load_dotenv(project_env, override=True)
@@ -293,17 +288,18 @@ def _check_pypi_version(*, prerelease: bool = False) -> str | None:
             data = json.loads(resp.read())
 
         if prerelease:
-            # Get all versions and pick the latest
             versions = list(data.get("releases", {}).keys())
             if versions:
-                return versions[-1]
+                return str(versions[-1])
 
         return data.get("info", {}).get("version")
     except Exception:
         return None
 
 
-def _perform_upgrade(*, target_version: str, prerelease: bool = False) -> tuple[bool, str]:
+def _perform_upgrade(
+    *, target_version: str, prerelease: bool = False
+) -> tuple[bool, str]:
     """Run pip install to upgrade dcoder."""
     cmd = ["pip", "install", "--upgrade", f"dcoder=={target_version}"]
     if prerelease:

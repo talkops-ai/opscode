@@ -65,6 +65,7 @@ def _parse_subagent_file(
     model = frontmatter.get("model")
     raw_skills = frontmatter.get("skills")
     raw_tools = frontmatter.get("tools")
+    raw_permission_tier = frontmatter.get("permission_tier")
 
     name = (
         name_value.strip()
@@ -100,23 +101,53 @@ def _parse_subagent_file(
             name,
         )
 
-    skills: list[str] | None = (
-        [str(s) for s in raw_skills] if isinstance(raw_skills, list) else None
+    if isinstance(raw_skills, str):
+        skills: list[str] | None = [s.strip() for s in raw_skills.split(",") if s.strip()]
+    elif isinstance(raw_skills, list):
+        skills = [str(s) for s in raw_skills]
+    else:
+        skills = None
+
+    if isinstance(raw_tools, str):
+        tools: list[str] | None = [t.strip() for t in raw_tools.split(",") if t.strip()]
+    elif isinstance(raw_tools, list):
+        tools = [str(t) for t in raw_tools]
+    else:
+        tools = None
+
+    raw_mcp_config = frontmatter.get("mcp_config")
+    raw_mcp_files = frontmatter.get("mcp_files")
+
+    mcp_config: dict[str, Any] | None = (
+        dict(raw_mcp_config) if isinstance(raw_mcp_config, dict) else None
     )
-    tools: list[str] | None = (
-        [str(t) for t in raw_tools] if isinstance(raw_tools, list) else None
+    mcp_files: list[str] | None = (
+        [str(f) for f in raw_mcp_files] if isinstance(raw_mcp_files, list) else None
     )
 
-    return {
+    permission_tier: str | None = (
+        raw_permission_tier.strip()
+        if isinstance(raw_permission_tier, str) and raw_permission_tier.strip()
+        else None
+    )
+
+    meta: SubagentMetadata = {
         "name": name,
         "description": description,
         "system_prompt": match.group(2).strip(),
         "model": model,
         "skills": skills,
         "tools": tools,
+        "permission_tier": permission_tier,
         "source": "",
         "path": str(file_path),
     }
+    if mcp_config is not None:
+        meta["mcp_config"] = mcp_config
+    if mcp_files is not None:
+        meta["mcp_files"] = mcp_files
+
+    return meta
 
 
 def _load_subagents_from_dir(

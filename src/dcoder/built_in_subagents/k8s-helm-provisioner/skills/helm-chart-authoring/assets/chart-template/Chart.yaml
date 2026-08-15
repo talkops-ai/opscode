@@ -1,0 +1,9 @@
+apiVersion: v2
+name: my-app
+description: Production-grade Helm chart boilerplate
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - microservice
+  - kubernetes

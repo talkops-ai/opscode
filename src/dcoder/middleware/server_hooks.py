@@ -11,7 +11,7 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -147,7 +147,7 @@ class _PreToolOutcome:
 def _subagent_transcript_config(
     call: ToolCallData,
     config: RunnableConfig,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     if call.name != _TASK_TOOL_NAME:
         yield
         return
@@ -424,7 +424,7 @@ class ServerHooksMiddleware(AgentMiddleware[ServerHooksState, ContextT, Response
         for tool_call in message.tool_calls:
             call = _tool_call_data_from_call(
                 tool_call,
-                mcp_server=self._mcp_servers.get(str(tool_call.get("name") or "")),
+                mcp_server=self._mcp_servers.get(tool_call.get("name") or ""),
             )
             behavior: PreToolBehavior = "none"
             reason: str | None = None
@@ -561,7 +561,7 @@ class ServerHooksMiddleware(AgentMiddleware[ServerHooksState, ContextT, Response
         gate = _session_gate(runtime.context)
         if not _event_enabled(gate, HookEvent.STOP):
             return None
-        continuation = int(state.get(_STOP_STATE_KEY, 0) or 0)
+        continuation = state.get(_STOP_STATE_KEY, 0) or 0
         context = _hook_context(runtime.context, None, self._cwd)
         decision = _invoke_hook(
             context,
@@ -1045,7 +1045,7 @@ def _inject_subagent_start_context(
     raw_args = original.get("args")
     args: dict[str, Any]
     if isinstance(raw_args, dict):
-        args = {str(key): value for key, value in raw_args.items()}
+        args = {key: value for key, value in raw_args.items()}
     else:
         args = {}
     description = args.get("description")
@@ -1057,7 +1057,7 @@ def _inject_subagent_start_context(
     tool_call = cast(
         "ToolCall",
         {
-            "name": str(original.get("name") or ""),
+            "name": original.get("name") or "",
             "args": args,
             "id": original.get("id"),
             "type": "tool_call",

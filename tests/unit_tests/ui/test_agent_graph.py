@@ -84,6 +84,7 @@ async def test_make_graph_blockbuster_resilience(monkeypatch):
         graph = await fresh_make_graph()
         assert isinstance(graph, Pregel)
     finally:
+        monkeypatch.undo()
         os.environ.pop("OPENAI_API_KEY", None)
         os.environ.pop(f"{prefix}ASSISTANT_ID", None)
         os.environ.pop(f"{prefix}MODEL", None)

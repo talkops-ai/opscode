@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import pytest
 from unittest.mock import Mock, MagicMock
 
@@ -102,11 +103,21 @@ class TestTextualAdapterToolMessage:
         from dcoder.ui.textual_adapter import TextualAdapter
 
         mock_app = MagicMock()
+        loop = asyncio.get_running_loop()
+        approval_calls = []
+
+        async def mock_request_approval(action_requests, assistant_id):
+            approval_calls.append((action_requests, assistant_id))
+            fut = loop.create_future()
+            fut.set_result({"type": "approve"})
+            return fut
+
         adapter = TextualAdapter(
             app=mock_app,
             client=MagicMock(),
             assistant_id="mock_id",
             status_bar=MagicMock(),
+            request_approval=mock_request_approval,
         )
 
         mock_interrupt = Mock()
@@ -125,17 +136,10 @@ class TestTextualAdapterToolMessage:
                 yield ((), "updates", {"__interrupt__": (mock_interrupt,)})
 
         adapter._client.astream = mock_astream
-        from unittest.mock import AsyncMock
-        adapter._await_approval = AsyncMock(return_value=True)
 
         await adapter.stream_turn(prompt="Test", thread_id="t1")
 
-        # Verify InterruptRaised message was posted EXACTLY ONCE
-        posted_interrupts = [
-            call[0][0]
-            for call in mock_app.post_message.call_args_list
-            if isinstance(call[0][0], TextualAdapter.InterruptRaised)
-        ]
-        assert len(posted_interrupts) == 1
-        assert posted_interrupts[0].tool_name == "edit_file"
+        # Verify request_approval was called EXACTLY ONCE
+        assert len(approval_calls) == 1
+        assert approval_calls[0][0][0]["action"] == "edit_file"
 

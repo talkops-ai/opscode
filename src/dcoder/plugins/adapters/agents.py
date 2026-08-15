@@ -13,6 +13,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _enrich_plugin_subagent(meta: SubagentMetadata, plugin: PluginInstance) -> SubagentMetadata:
+    p_id = plugin.plugin_id  # e.g., "terraform-linter@devops-terraform-toolkit"
+    raw_name = meta.get("name", "")
+
+    if not raw_name or raw_name == plugin.name or p_id.startswith(f"{raw_name}@"):
+        meta["name"] = p_id
+    elif not raw_name.startswith(f"{p_id}:"):
+        meta["name"] = f"{p_id}:{raw_name}"
+
+    meta["source"] = f"plugin:{p_id}"
+
+    # Attach default plugin skill wildcard if no skills explicitly set
+    if not meta.get("skills"):
+        meta["skills"] = [f"{p_id}:*"]
+
+    # Attach plugin MCP files or inline config if subagent doesn't specify own
+    if "mcp_config" not in meta and "mcp_files" not in meta:
+        if plugin.inventory.mcp_files:
+            meta["mcp_files"] = [str(p) for p in plugin.inventory.mcp_files]
+        elif plugin.manifest and plugin.manifest.inline_mcp:
+            meta["mcp_config"] = {"mcpServers": plugin.manifest.inline_mcp}
+
+    return meta
+
+
 def plugin_subagents(plugins: tuple[PluginInstance, ...]) -> list[SubagentMetadata]:
     """Discover and parse subagents from enabled plugins."""
     from dcoder.subagents.loader import _parse_subagent_file
@@ -20,7 +45,6 @@ def plugin_subagents(plugins: tuple[PluginInstance, ...]) -> list[SubagentMetada
     subagents: list[SubagentMetadata] = []
 
     for plugin in plugins:
-        p_id = plugin.plugin_id
         for agent_path in plugin.inventory.agents:
             if not agent_path.exists():
                 continue
@@ -30,23 +54,17 @@ def plugin_subagents(plugins: tuple[PluginInstance, ...]) -> list[SubagentMetada
                     if entry.is_file() and entry.suffix == ".md":
                         meta = _parse_subagent_file(entry, fallback_name=entry.stem)
                         if meta:
-                            meta["name"] = f"{p_id}:{meta['name']}"
-                            meta["source"] = f"plugin:{p_id}"
-                            subagents.append(meta)
+                            subagents.append(_enrich_plugin_subagent(meta, plugin))
                     elif entry.is_dir():
                         sub_agents_file = entry / "AGENTS.md"
                         if sub_agents_file.is_file():
                             meta = _parse_subagent_file(sub_agents_file, fallback_name=entry.name)
                             if meta:
-                                meta["name"] = f"{p_id}:{meta['name']}"
-                                meta["source"] = f"plugin:{p_id}"
-                                subagents.append(meta)
+                                subagents.append(_enrich_plugin_subagent(meta, plugin))
             elif agent_path.is_file() and agent_path.suffix == ".md":
                 meta = _parse_subagent_file(agent_path, fallback_name=agent_path.stem)
                 if meta:
-                    meta["name"] = f"{p_id}:{meta['name']}"
-                    meta["source"] = f"plugin:{p_id}"
-                    subagents.append(meta)
+                    subagents.append(_enrich_plugin_subagent(meta, plugin))
 
     return subagents
 

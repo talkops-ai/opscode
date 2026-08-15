@@ -49,17 +49,20 @@ def test_is_sensitive_write_path(tmp_path: Path):
     assert _is_sensitive_write_path(root, out_of_bounds)
 
 
+from langchain_core.messages import ToolCall
+
+
 def test_routine_write_allowed(tmp_path: Path):
     root = tmp_path / "repo"
     root.mkdir()
 
-    call_py = {"name": "write_file", "args": {"file_path": "src/app.py"}}
+    call_py: ToolCall = {"name": "write_file", "args": {"file_path": "src/app.py"}, "id": "1", "type": "tool_call"}
     assert _routine_write_allowed(root, call_py)
 
-    call_env = {"name": "write_file", "args": {"file_path": ".env"}}
+    call_env: ToolCall = {"name": "write_file", "args": {"file_path": ".env"}, "id": "2", "type": "tool_call"}
     assert not _routine_write_allowed(root, call_env)
 
-    call_sh = {"name": "write_file", "args": {"file_path": "scripts/deploy.sh"}}
+    call_sh: ToolCall = {"name": "write_file", "args": {"file_path": "scripts/deploy.sh"}, "id": "3", "type": "tool_call"}
     assert not _routine_write_allowed(root, call_sh)
 
 

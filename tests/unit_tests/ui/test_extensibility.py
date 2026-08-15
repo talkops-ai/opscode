@@ -25,10 +25,13 @@ def test_user_preferences():
 
 
 
-def test_welcome_banner_tool_detection():
-    banner = WelcomeBanner()
-    status = banner._detect_tools()
-    assert "terraform" in status
-    assert "kubectl" in status
-    assert "helm" in status
-    assert "ansible" in status
+def test_devops_tool_detection():
+    from dcoder.commands.core.doctor import DoctorHandler
+
+    handler = DoctorHandler()
+    sec = handler._collect_devops_tools()
+    tool_labels = [i.label.lower() for i in sec.items]
+    assert "terraform" in tool_labels
+    assert "kubectl" in tool_labels
+    assert "helm" in tool_labels
+    assert "docker" in tool_labels

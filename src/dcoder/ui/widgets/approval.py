@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from textual import events, on
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.content import Content
@@ -13,7 +14,6 @@ from textual.message import Message
 from textual.widgets import Input, Static
 
 if TYPE_CHECKING:
-    from textual import events
     from textual.app import ComposeResult
 
 import uuid
@@ -81,6 +81,7 @@ class ApprovalMenu(Container):
         Binding("y", "select_approve", "Approve", show=False),
         Binding("a", "select_auto", "Auto-approve", show=False),
         Binding("n", "select_reject", "Reject", show=False),
+        Binding("escape", "select_reject", "Reject", show=False),
         Binding("e", "toggle_expand", "Expand command", show=False),
         Binding("tab", "reject_with_reason", "Reject with reason", show=False),
     ]
@@ -188,17 +189,25 @@ class ApprovalMenu(Container):
             self._action_requests: list[dict[str, Any]] = [{"name": tool_name, "call_id": call_id, "args": tool_args}]
             self._assistant_id = None
         elif isinstance(action_requests, dict):
-            self._action_requests = [action_requests]
+            req_dict = dict(action_requests)
+            if "call_id" not in req_dict and call_id_or_assistant:
+                req_dict["call_id"] = call_id_or_assistant
+            self._action_requests = [req_dict]
             self._assistant_id = call_id_or_assistant
         elif isinstance(action_requests, list):
-            self._action_requests = [req if isinstance(req, dict) else {"name": str(req)} for req in action_requests]
+            self._action_requests = []
+            for req in action_requests:
+                req_dict = dict(req) if isinstance(req, dict) else {"name": str(req)}
+                if "call_id" not in req_dict and call_id_or_assistant:
+                    req_dict["call_id"] = call_id_or_assistant
+                self._action_requests.append(req_dict)
             self._assistant_id = call_id_or_assistant
         else:
             self._action_requests = []
             self._assistant_id = call_id_or_assistant
 
         self._tool_names: list[str] = [
-            str(r.get("name", "unknown")) for r in self._action_requests
+            str(r.get("name") or r.get("action", "unknown")) for r in self._action_requests
         ]
         self._is_auto_fallback = any(
             isinstance(request.get("description"), str)
@@ -372,7 +381,7 @@ class ApprovalMenu(Container):
         if not self._is_minimal:
             await self._update_tool_info()
         self._update_options()
-        self.call_after_refresh(self.focus)
+        self.focus()
 
     async def _update_tool_info(self) -> None:
         """Mount tool-specific approval widgets."""
@@ -382,7 +391,7 @@ class ApprovalMenu(Container):
         await self._tool_info_container.remove_children()
 
         for i, action_request in enumerate(self._action_requests):
-            tool_name: str = str(action_request.get("name", "unknown"))
+            tool_name: str = str(action_request.get("name") or action_request.get("action", "unknown"))
             tool_args_raw = action_request.get("args", {})
             tool_args: dict[str, Any] = tool_args_raw if isinstance(tool_args_raw, dict) else {}
 
@@ -489,6 +498,23 @@ class ApprovalMenu(Container):
             self._get_command_display(expanded=self._command_expanded)
         )
 
+    @on(events.Click, ".approval-option")
+    def _on_option_clicked(self, event: events.Click) -> None:
+        """Handle clicks on specific approval option widgets."""
+        event.stop()
+        for idx, widget in enumerate(self._option_widgets):
+            if event.control == widget:
+                self._handle_selection(idx)
+                break
+
+    def on_click(self, event: events.Click) -> None:
+        """Handle clicks anywhere on option widgets or menu options container."""
+        for idx, widget in enumerate(self._option_widgets):
+            if event.control == widget or (widget.is_mounted and event.get_content_offset(widget) is not None):
+                self._handle_selection(idx)
+                event.stop()
+                return
+
     def _handle_selection(
         self, option: int, *, reject_message: str | None = None
     ) -> None:
@@ -504,8 +530,8 @@ class ApprovalMenu(Container):
             self._future.set_result(decision)
 
         first_req = self._action_requests[0] if self._action_requests else {}
-        tool_name: str = str(first_req.get("name", ""))
-        call_id: str = str(first_req.get("call_id", ""))
+        tool_name: str = str(first_req.get("name") or first_req.get("action", ""))
+        call_id: str = str(first_req.get("call_id") or self._assistant_id or "")
         approved = decision_type in {"approve", "auto_approve_all"}
 
         self.post_message(

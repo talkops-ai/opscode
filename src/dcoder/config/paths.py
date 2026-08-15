@@ -104,11 +104,38 @@ PLUGIN_STATE_PATH: Final[Path] = STATE_DIR / "plugin_state.json"
 PLUGIN_MARKETPLACES_PATH: Final[Path] = STATE_DIR / "plugin_marketplaces.json"
 """``~/.dcoder/.state/plugin_marketplaces.json`` — Marketplace source registry."""
 
+# ── Scoped settings files (Claude Code pattern) ─────────
+
+USER_SETTINGS_PATH: Final[Path] = DATA_DIR / "settings.json"
+"""``~/.dcoder/settings.json`` — User-scope settings (enabledPlugins, etc.).
+
+Matches Claude Code's ``~/.claude/settings.json`` layout.
+"""
+
+
+def project_settings_path(project_root: Path) -> Path:
+    """Return ``{project_root}/.dcoder/settings.json`` — project-scope settings.
+
+    This file is committed to git and shared with all collaborators.
+    Schema: ``{ "enabledPlugins": { "plugin@marketplace": true } }``
+    """
+    return project_dcoder_dir(project_root) / "settings.json"
+
+
+def project_local_settings_path(project_root: Path) -> Path:
+    """Return ``{project_root}/.dcoder/settings.local.json`` — local-scope settings.
+
+    This file is gitignored (personal project overrides).
+    Schema: ``{ "enabledPlugins": { "plugin@marketplace": true } }``
+    """
+    return project_dcoder_dir(project_root) / "settings.local.json"
+
 
 
 # ── Project root markers ─────────────────────────────────
 
 PROJECT_ROOT_MARKERS: Final[tuple[str, ...]] = (
+    ".dcoder",
     ".git",
     "terragrunt.hcl",
     "Chart.yaml",

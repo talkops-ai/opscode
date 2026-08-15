@@ -262,6 +262,9 @@ def _extract_text(
 
 
 
+
+
+
 class TextualAdapter:
     """Bridge between LangGraph SDK stream events and Textual widgets.
 
@@ -346,6 +349,7 @@ class TextualAdapter:
         on_subagent_event: Callable[[dict[str, Any]], None] | None = None,
         app: Any = None,
         prompt_manager: Any = None,
+        request_approval: Callable[..., Any] | None = None,
     ) -> None:
         self._client = client
         self._assistant_id = assistant_id
@@ -356,12 +360,21 @@ class TextualAdapter:
         self._on_subagent_event = on_subagent_event
         self._app = app
         self._prompt_manager = prompt_manager
+        self._request_approval = request_approval
         self._stats = SessionStats()
         self._cancel_event = asyncio.Event()
         self._active_tools_map: dict[str, str] = {}
         self._approval_events: dict[str, asyncio.Event] = {}
         self._approval_responses: dict[str, bool] = {}
         self._turn_number = 0
+
+    @property
+    def _effective_request_approval(self) -> Callable[..., Any] | None:
+        if self._request_approval is not None:
+            return self._request_approval
+        if self._app and hasattr(self._app, "_request_approval"):
+            return self._app._request_approval
+        return None
 
     @property
     def stats(self) -> SessionStats:
@@ -525,7 +538,7 @@ class TextualAdapter:
 
                 interrupt_occurred = False
                 resume_payload: dict[str, Any] = {}
-                pending_interrupts: list[tuple[str, Any]] = []
+                pending_interrupts: dict[str, Any] = {}
 
                 # Show the Thinking spinner before each astream iteration
                 if self._set_spinner and not getattr(self, "_current_tool_messages", {}):
@@ -613,8 +626,7 @@ class TextualAdapter:
                                 
                                 if interrupt_val and interrupt_id:
                                     logger.debug("TUI: Handle interrupt %s: %s", interrupt_id, interrupt_val)
-                                    if not any(int_id == interrupt_id for int_id, _ in pending_interrupts):
-                                        pending_interrupts.append((interrupt_id, interrupt_val))
+                                    pending_interrupts[interrupt_id] = interrupt_val
                                     
                     elif current_stream_mode == "messages":
                         msg_obj, meta = data if isinstance(data, tuple) else (data, {})
@@ -661,15 +673,13 @@ class TextualAdapter:
                             blocks = msg_obj.content_blocks
                             for block in blocks:
                                 block_type = block.get("type")
-                                
+
                                 if block_type == "text":
                                     text = block.get("text", "")
                                     if text:
                                         pending_text = pending_text_by_namespace.get(ns_key, "")
                                         pending_text += text
                                         pending_text_by_namespace[ns_key] = pending_text
-                                        # Track that this namespace has an active assistant
-                                        # for tool-call boundary clearing.
                                         if ns_key not in assistant_message_by_namespace:
                                             assistant_message_by_namespace[ns_key] = True
                                             if self._set_spinner:
@@ -677,38 +687,36 @@ class TextualAdapter:
 
                                         if self._messages is not None and is_main_agent:
                                             self._messages.append_assistant_token(text)
-                                            
+
                                 elif block_type in {"tool_call_chunk", "tool_call"}:
                                     chunk_name = block.get("name")
                                     chunk_args = block.get("args")
                                     chunk_id = block.get("id")
                                     chunk_index = block.get("index")
-                                    
+
                                     buffer_key = tool_call_buffer_key(chunk_index, chunk_id, len(tool_call_buffers))
                                     buffer = tool_call_buffers.setdefault(buffer_key, ToolCallBuffer())
                                     buffer.ingest(name=chunk_name, tool_id=chunk_id, args=chunk_args)
-                                    
+
                                     buffer_name = buffer.name
                                     buffer_id = buffer.tool_id
                                     if buffer_name is None:
                                         continue
-                                        
+
                                     parsed_args = buffer.parse_args()
                                     if parsed_args is None:
                                         continue
-                                        
+
                                     if self._messages is not None and is_main_agent:
                                         self._messages.finish_assistant_message()
-                                    # Clear namespace tracking so post-tool text starts
-                                    # a fresh assistant bubble (matching reference).
                                     pending_text_by_namespace.pop(ns_key, None)
                                     assistant_message_by_namespace.pop(ns_key, None)
-                                        
+
                                     if buffer_id is not None and buffer_id not in displayed_tool_ids:
                                         displayed_tool_ids.add(buffer_id)
                                         if self._set_spinner:
                                             await self._set_spinner("Thinking")
-                                        
+
                                         if self._messages is not None and is_main_agent:
                                             self._messages.add_tool_call(name=buffer_name, call_id=buffer_id, args=parsed_args)
                                             self._active_tools_map[buffer_id] = buffer_name
@@ -726,27 +734,73 @@ class TextualAdapter:
                             await res
                     
                 if pending_interrupts:
-                    for int_id, int_val in pending_interrupts:
-                        action_requests = int_val.get("action_requests", [])
-                        call_ids = []
-                        for i, req in enumerate(action_requests):
-                            call_id = f"{int_id}_{i}"
-                            call_ids.append(call_id)
-                            if self._app:
-                                self._app.post_message(
-                                    self.InterruptRaised(
-                                        tool_name=req.get("action") or req.get("name", "unknown"),
-                                        call_id=call_id,
-                                        args=req.get("args", {})
-                                    )
+                    req_approval_fn = self._effective_request_approval
+                    for int_id, int_val in list(pending_interrupts.items()):
+                        action_requests = int_val.get("action_requests", []) if isinstance(int_val, dict) else []
+
+                        if self._auto_approve:
+                            decisions = [{"type": "approve"} for _ in action_requests]
+                            resume_payload[int_id] = {"decisions": decisions}
+                            continue
+
+                        if req_approval_fn is not None:
+                            future = await req_approval_fn(
+                                action_requests, self._assistant_id
+                            )
+                            decision = await future
+
+                            if (
+                                isinstance(decision, dict)
+                                and decision.get("type") == "auto_approve_all"
+                                and getattr(self._app, "_on_auto_approve_enabled", None) is not None
+                            ):
+                                callback_result = self._app._on_auto_approve_enabled()
+                                enabled = (
+                                    await callback_result
+                                    if inspect.isawaitable(callback_result)
+                                    else callback_result
                                 )
-                        if call_ids:
-                            approved_results = await asyncio.gather(*(self._await_approval(cid) for cid in call_ids))
-                            decisions = [{"type": "approve" if approved else "reject"} for approved in approved_results]
+                                if enabled is None:
+                                    enabled = True
+                                if enabled is False:
+                                    continue
+
+                            if isinstance(decision, dict):
+                                decision_type = decision.get("type")
+                                if decision_type in {"approve", "auto_approve_all"}:
+                                    decisions = [{"type": "approve"} for _ in action_requests]
+                                elif decision_type == "switch_manual":
+                                    decisions = [{"type": "reject"} for _ in action_requests]
+                                elif decision_type == "reject":
+                                    reject_msg = decision.get("message")
+                                    rej_dict: dict[str, Any] = {"type": "reject"}
+                                    if reject_msg:
+                                        rej_dict["message"] = reject_msg
+                                    decisions = [rej_dict for _ in action_requests]
+                                else:
+                                    decisions = [{"type": "approve"} for _ in action_requests]
+                            else:
+                                decisions = [{"type": "approve"} for _ in action_requests]
+                            resume_payload[int_id] = {"decisions": decisions}
                         else:
-                            decisions = []
-                        resume_payload[int_id] = {"decisions": decisions}
-                        
+                            # Backwards-compatible fallback
+                            call_ids = [f"{int_id}_{i}" for i in range(len(action_requests))]
+                            for i, req in enumerate(action_requests):
+                                if self._app:
+                                    self._app.post_message(
+                                        self.InterruptRaised(
+                                            tool_name=req.get("action") or req.get("name", "unknown"),
+                                            call_id=call_ids[i],
+                                            args=req.get("args", {})
+                                        )
+                                    )
+                            if call_ids:
+                                approved_results = await asyncio.gather(*(self._await_approval(cid) for cid in call_ids))
+                                decisions = [{"type": "approve" if approved else "reject"} for approved in approved_results]
+                            else:
+                                decisions = []
+                            resume_payload[int_id] = {"decisions": decisions}
+
                     from langgraph.types import Command
                     stream_input = Command(resume=resume_payload)
                     continue
@@ -798,13 +852,14 @@ class TextualAdapter:
     def submit_approval(self, call_id: str, approved: bool) -> None:
         """Submit HITL approval response from UI thread."""
         self._approval_responses[call_id] = approved
-        event = self._approval_events.get(call_id)
-        if event:
-            event.set()
+        event = self._approval_events.setdefault(call_id, asyncio.Event())
+        event.set()
 
     async def _await_approval(self, call_id: str) -> bool:
         """Pause stream loop until approval event resolves."""
-        evt = asyncio.Event()
-        self._approval_events[call_id] = evt
+        if call_id in self._approval_responses:
+            return self._approval_responses.pop(call_id)
+        evt = self._approval_events.setdefault(call_id, asyncio.Event())
         await evt.wait()
+        self._approval_events.pop(call_id, None)
         return self._approval_responses.pop(call_id, False)

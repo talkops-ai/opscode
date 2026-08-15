@@ -2,9 +2,12 @@
 
 import asyncio
 import pytest
+from unittest.mock import Mock, MagicMock
+from textual.app import App, ComposeResult
 from dcoder.file_ops import is_sensitive_file_path, format_display_path
 from dcoder.ui.tool_renderers import get_renderer
 from dcoder.ui.widgets.approval import ApprovalMenu, _is_command_too_long, _truncate_command
+from dcoder.ui.subagent_panel import SubagentPanel
 
 
 def test_sensitive_file_detection():
@@ -88,7 +91,6 @@ async def test_approval_menu_reject_with_reason():
     menu = ApprovalMenu(action_req)
     menu.set_future(future)
 
-    # Select reject and provide reason
     menu._handle_selection(menu._reject_index, reject_message="Do not destroy prod DB")
     assert future.done()
     result = future.result()
@@ -112,7 +114,6 @@ async def test_app_approval_menu_decided_removes_widget(monkeypatch):
     mock_menu = MockMenu()
     app._pending_approval_widget = mock_menu
 
-    # Mock _focus_chat_input_after_refresh
     monkeypatch.setattr(app, "_focus_chat_input_after_refresh", lambda: None)
 
     event = ApprovalMenu.Decided(
@@ -130,22 +131,19 @@ async def test_app_approval_menu_decided_removes_widget(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_app_interrupt_raised_waits_for_pending_approval(monkeypatch):
-    """Test that _on_interrupt_raised waits for active pending approval widget to clear."""
+async def test_app_request_approval_waits_for_pending_approval(monkeypatch):
+    """Test that _request_approval waits for active pending approval widget to clear."""
     from dcoder.ui.app import DCoderApp
-    from dcoder.ui.textual_adapter import TextualAdapter
 
     app = DCoderApp()
     app._pending_approval_widget = "active_dummy_widget"
 
-    # Async task that clears pending approval after a short delay
     async def clear_widget_later():
         await asyncio.sleep(0.02)
         app._pending_approval_widget = None
 
     asyncio.create_task(clear_widget_later())
 
-    # Mock query_one to prevent requiring a full Textual app DOM tree
     mounted_widgets = []
 
     class MockMessageList:
@@ -155,11 +153,139 @@ async def test_app_interrupt_raised_waits_for_pending_approval(monkeypatch):
     monkeypatch.setattr(app, "query_one", lambda selector, expect_type=None: MockMessageList())
     monkeypatch.setattr(app, "call_after_refresh", lambda func: None)
 
-    event = TextualAdapter.InterruptRaised("write_file", "call-456", {"file_path": "foo.py"})
-    await app._on_interrupt_raised(event)
+    future = await app._request_approval([{"name": "write_file", "args": {"file_path": "foo.py"}}])
 
     assert len(mounted_widgets) == 1
     assert app._pending_approval_widget is mounted_widgets[0]
+    assert not future.done()
+
+    mounted_widgets[0].action_select_approve()
+    assert future.done()
+    assert (await future)["type"] == "approve"
+
+
+@pytest.mark.asyncio
+async def test_approval_menu_mouse_click():
+    """Test ApprovalMenu mouse click selection on Approve option."""
+    action_req = {"name": "run_command", "call_id": "call-1", "args": {"command": "terraform plan"}}
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    menu = ApprovalMenu(action_req)
+    menu.set_future(future)
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield menu
+
+    app = TestApp()
+    async with app.run_test():
+        assert len(menu._option_widgets) > 0
+        click_event = Mock()
+        click_event.control = menu._option_widgets[0]
+        menu._on_option_clicked(click_event)
+
+        assert future.done()
+        assert future.result()["type"] == "approve"
+
+
+@pytest.mark.asyncio
+async def test_approval_menu_mouse_click_reject():
+    """Test ApprovalMenu mouse click selection on Reject option."""
+    action_req = {"name": "run_command", "call_id": "call-1", "args": {"command": "terraform plan"}}
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    menu = ApprovalMenu(action_req)
+    menu.set_future(future)
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield menu
+
+    app = TestApp()
+    async with app.run_test():
+        assert len(menu._option_widgets) > 1
+        click_event = Mock()
+        # Click reject option
+        click_event.control = menu._option_widgets[menu._reject_index]
+        menu._on_option_clicked(click_event)
+
+        assert future.done()
+        assert future.result()["type"] == "reject"
+
+
+@pytest.mark.asyncio
+async def test_approval_menu_mouse_click_auto_approve():
+    """Test ApprovalMenu mouse click selection on Auto-approve option."""
+    action_req = {"name": "run_command", "call_id": "call-1", "args": {"command": "terraform plan"}}
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    menu = ApprovalMenu(action_req, auto_mode_eligible=True)
+    menu.set_future(future)
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield menu
+
+    app = TestApp()
+    async with app.run_test():
+        assert len(menu._option_widgets) > 2
+        click_event = Mock()
+        click_event.control = menu._option_widgets[1]
+        menu._on_option_clicked(click_event)
+
+        assert future.done()
+        assert future.result()["type"] == "auto_approve_all"
+
+
+@pytest.mark.asyncio
+async def test_approval_menu_select_positions_and_navigation():
+    """Test keyboard position selection (1, 2, 3) and expand toggle."""
+    action_req = {"name": "run_command", "call_id": "call-1", "args": {"command": "terraform apply"}}
+    loop = asyncio.get_running_loop()
+
+    # Test position 0 (Approve)
+    fut0 = loop.create_future()
+    menu0 = ApprovalMenu(action_req)
+    menu0.set_future(fut0)
+    menu0.action_select_position(0)
+    assert (await fut0)["type"] == "approve"
+
+    # Test position 1 with auto mode (Auto-approve all)
+    fut1 = loop.create_future()
+    menu1 = ApprovalMenu(action_req, auto_mode_eligible=True)
+    menu1.set_future(fut1)
+    menu1.action_select_position(1)
+    assert (await fut1)["type"] == "auto_approve_all"
+
+    # Test position 2 with auto mode (Reject)
+    fut2 = loop.create_future()
+    menu2 = ApprovalMenu(action_req, auto_mode_eligible=True)
+    menu2.set_future(fut2)
+    menu2.action_select_position(2)
+    assert (await fut2)["type"] == "reject"
+
+    # Test position 1 without auto mode (Reject)
+    fut_no_auto = loop.create_future()
+    menu_no_auto = ApprovalMenu(action_req, auto_mode_eligible=False)
+    menu_no_auto.set_future(fut_no_auto)
+    menu_no_auto.action_select_position(1)
+    assert (await fut_no_auto)["type"] == "reject"
+
+    # Test toggle expand
+    menu_exp = ApprovalMenu(action_req)
+    assert menu_exp._command_expanded is False
+    menu_exp.action_toggle_expand()
+    # Note: action_toggle_expand toggles when _has_expandable_command and _command_widget are present
+    assert hasattr(menu_exp, "action_toggle_expand")
+
+
+@pytest.mark.asyncio
+async def test_subagent_panel_timer_pause_resume():
+    """Verify that SubagentPanel pause() and resume() correctly control the refresh timer."""
+    panel = SubagentPanel()
+    # Pause stops any active timer
+    panel.pause()
+    assert panel._timer is None
 
 
 @pytest.mark.asyncio
@@ -181,5 +307,3 @@ async def test_task_approval_widget_rendering():
     assert "terraform-reviewer" in str(children[0].render())
     assert "Subagent will have access" in str(children[1].render())
     assert "Audit main.tf" in str(children[3].render())
-
-

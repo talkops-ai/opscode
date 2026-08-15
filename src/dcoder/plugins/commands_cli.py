@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -21,7 +22,25 @@ from dcoder.plugins.marketplace import (
     redact_marketplace_source,
     redact_urls_in_text,
 )
+from dcoder.plugins.models import InstallScope
 from dcoder.plugins.store import load_marketplace_records
+
+
+def _resolve_project_root(scope: str | None) -> Path | None:
+    """Resolve the project root for project/local scoped commands.
+
+    Returns ``None`` when ``scope`` is ``"user"`` or the project root
+    cannot be determined.
+    """
+    if scope in {None, "user"}:
+        return None
+    from dcoder.config.settings import _find_project_root  # noqa: PLC2701
+
+    root = _find_project_root()
+    if root is None and scope in {"project", "local"}:
+        # Fall back to cwd when no marker is found
+        root = Path.cwd()
+    return root
 
 
 def setup_plugin_parser(
@@ -67,13 +86,37 @@ def setup_plugin_parser(
 
     install_parser = plugin_sub.add_parser("install", help="Install a plugin")
     install_parser.add_argument("plugin_id")
+    install_parser.add_argument(
+        "--scope",
+        choices=["user", "project", "local"],
+        default="user",
+        help="Installation scope: user (global), project (shared), or local (gitignored)",
+    )
     uninstall_parser = plugin_sub.add_parser("uninstall", help="Uninstall a plugin")
     uninstall_parser.add_argument("plugin_id")
+    uninstall_parser.add_argument(
+        "--scope",
+        choices=["user", "project", "local"],
+        default=None,
+        help="Scope to uninstall from (omit to remove all scopes)",
+    )
 
     enable_parser = plugin_sub.add_parser("enable", help="Enable a plugin")
     enable_parser.add_argument("plugin_id")
+    enable_parser.add_argument(
+        "--scope",
+        choices=["user", "project", "local"],
+        default="user",
+        help="Scope to enable in",
+    )
     disable_parser = plugin_sub.add_parser("disable", help="Disable a plugin")
     disable_parser.add_argument("plugin_id")
+    disable_parser.add_argument(
+        "--scope",
+        choices=["user", "project", "local"],
+        default="user",
+        help="Scope to disable in",
+    )
 
     marketplace_parser = plugin_sub.add_parser(
         "marketplace", help="Manage plugin marketplaces"
@@ -136,8 +179,13 @@ def execute_plugin_command(args: argparse.Namespace) -> str | None:
         print(text)
         return text
     if command == "install":
+        raw_scope = getattr(args, "scope", "user") or "user"
+        scope = cast(InstallScope, raw_scope)
+        project_root = _resolve_project_root(scope)
         try:
-            instance = install_plugin(args.plugin_id)
+            instance = install_plugin(
+                args.plugin_id, scope=scope, project_root=project_root,
+            )
         except (MarketplaceError, FileNotFoundError, OSError, ValueError) as exc:
             text = f"Failed to install {args.plugin_id}: {exc}"
             print(text)
@@ -145,20 +193,30 @@ def execute_plugin_command(args: argparse.Namespace) -> str | None:
         details = ""
         if instance.version is not None:
             details = f" (version: {instance.version})"
+        scope_label = {"user": "for you", "project": "for all collaborators", "local": "for you in this repo"}
         text = (
-            f"Installed plugin {instance.plugin_id}{details}. Run /reload to activate."
+            f"Installed plugin {instance.plugin_id}{details} "
+            f"({scope_label[scope]}). Run /reload to activate."
         )
         print(text)
         return text
     if command == "uninstall":
-        uninstall_plugin(args.plugin_id)
+        raw_scope = getattr(args, "scope", None)
+        scope = cast(InstallScope, raw_scope) if raw_scope else None
+        project_root = _resolve_project_root(scope) if scope else None
+        uninstall_plugin(args.plugin_id, scope=scope, project_root=project_root)
         text = f"Uninstalled plugin {args.plugin_id}."
         print(text)
         return text
     if command in {"enable", "disable"}:
         enabled = command == "enable"
+        raw_scope = getattr(args, "scope", "user") or "user"
+        scope = cast(InstallScope, raw_scope)
+        project_root = _resolve_project_root(scope)
         try:
-            set_installed_plugin_enabled(args.plugin_id, enabled=enabled)
+            set_installed_plugin_enabled(
+                args.plugin_id, enabled=enabled, scope=scope, project_root=project_root,
+            )
         except (MarketplaceError, OSError, ValueError) as exc:
             text = f"Failed to {command} {args.plugin_id}: {exc}"
             print(text)

@@ -115,3 +115,100 @@ def test_resume_state_middleware():
     
     update = middleware.after_model(state, MagicMock())
     assert update == {"_context_tokens": 30}
+
+
+@pytest.mark.asyncio
+async def test_dcoder_app_request_approval_shell_allow_list(monkeypatch):
+    """Verify that shell commands on the allow-list are auto-approved without prompting."""
+    from dcoder.ui.app import DCoderApp
+
+    app = DCoderApp()
+    app._shell_allow_list = ["terraform plan", "git status"]
+
+    mounted = []
+
+    class MockMessageList:
+        async def mount(self, widget):
+            mounted.append(widget)
+
+    monkeypatch.setattr(app, "query_one", lambda selector, expect_type=None: MockMessageList())
+
+    action_requests = [
+        {"name": "run_command", "args": {"command": "terraform plan"}}
+    ]
+
+    future = await app._request_approval(action_requests)
+    assert future.done()
+    assert (await future)["type"] == "approve"
+    assert len(mounted) == 1
+    assert "Auto-approved shell command" in mounted[0]._raw_content
+
+
+@pytest.mark.asyncio
+async def test_dcoder_app_request_approval_spinner_and_subagent_pause_lifecycle(monkeypatch):
+    """Verify loading spinner and subagent panel are paused during approval and resumed after decision."""
+    from dcoder.ui.app import DCoderApp
+
+    app = DCoderApp()
+    pause_called = []
+    resume_called = []
+
+    mock_loading = MagicMock()
+    mock_loading.pause = lambda: pause_called.append("spinner")
+    mock_loading.resume = lambda: resume_called.append("spinner")
+    app._loading_widget = mock_loading
+
+    mock_subagent_panel = MagicMock()
+    mock_subagent_panel.pause = lambda: pause_called.append("subagent")
+    mock_subagent_panel.resume = lambda: resume_called.append("subagent")
+    monkeypatch.setattr(app, "_get_subagent_panel", lambda: mock_subagent_panel)
+
+    class MockMessageList:
+        def mount_inline_prompt(self, menu):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda selector, expect_type=None: MockMessageList())
+    monkeypatch.setattr(app, "call_after_refresh", lambda func: None)
+
+    future = await app._request_approval([{"name": "write_file", "args": {"file_path": "test.txt"}}])
+    assert "spinner" in pause_called
+    assert "subagent" in pause_called
+
+    # Resolve future
+    future.set_result({"type": "approve"})
+    # Wait small microtick for callback
+    await asyncio.sleep(0.01)
+
+    assert "spinner" in resume_called
+    assert "subagent" in resume_called
+
+
+@pytest.mark.asyncio
+async def test_dcoder_app_on_approval_menu_decided_auto_mode_switch(monkeypatch):
+    """Verify that auto_approve_all decision switches approval mode to AUTO."""
+    from dcoder.ui.app import DCoderApp
+    from dcoder.approval_mode import ApprovalMode
+    from dcoder.ui.widgets.approval import ApprovalMenu
+
+    app = DCoderApp()
+    mode_set = None
+
+    async def mock_set_approval_mode(mode):
+        nonlocal mode_set
+        mode_set = mode
+        return True
+
+    monkeypatch.setattr(app, "_set_approval_mode", mock_set_approval_mode)
+    monkeypatch.setattr(app, "_focus_chat_input_after_refresh", lambda: None)
+
+    event = ApprovalMenu.Decided(
+        decision={"type": "auto_approve_all"},
+        approved=True,
+        tool_name="run_command",
+        call_id="call-auto",
+        comment="",
+    )
+
+    await app._on_approval_menu_decided(event)
+    assert mode_set == ApprovalMode.AUTO
+

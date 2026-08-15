@@ -12,6 +12,8 @@ JsonObject = dict[str, Any]
 JsonValue = Any
 
 MarketplaceSourceType = Literal["directory", "file", "github", "git", "url"]
+InstallScope = Literal["user", "project", "local"]
+"""Plugin installation scope — matches Claude Code's three-tier model."""
 ExternalPluginRepositorySourceType = Literal["github", "git-subdir", "url"]
 UnsupportedComponent = Literal["hooks"]
 
@@ -178,14 +180,34 @@ class MarketplaceRecord:
     source: str
     install_location: str
     ref: str | None = None
+    is_project: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class InstalledPluginEntry:
-    """Install record for a plugin."""
+    """Install record for a plugin.
+
+    Matches Claude Code's ``installed_plugins.json`` entry schema.
+    Each plugin ID maps to an *array* of entries, one per scope.
+
+    Attributes:
+        install_path: Absolute path to the cached plugin root.
+        version: Version declared by the plugin manifest, if any.
+        scope: Installation scope — ``"user"``, ``"project"``, or ``"local"``.
+        project_path: Set when ``scope`` is ``"project"`` or ``"local"``;
+            absolute path to the project root this entry belongs to.
+        installed_at: ISO 8601 timestamp of initial install.
+        last_updated: ISO 8601 timestamp of last update.
+        git_commit_sha: Optional commit SHA for the plugin source.
+    """
 
     install_path: str
     version: str | None
+    scope: InstallScope = "user"
+    project_path: str | None = None
+    installed_at: str | None = None
+    last_updated: str | None = None
+    git_commit_sha: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

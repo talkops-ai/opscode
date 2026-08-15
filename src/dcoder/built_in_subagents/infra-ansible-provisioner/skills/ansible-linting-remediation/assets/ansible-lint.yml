@@ -1,0 +1,19 @@
+# .ansible-lint
+profile: production
+
+offline: false
+
+write_list:
+  - format
+  - jinja
+  - key-order
+  - name
+  - yaml
+
+exclude_paths:
+  - .cache/
+  - .git/
+  - vendor/
+
+warn_list:
+  - experimental

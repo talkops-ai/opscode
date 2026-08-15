@@ -162,3 +162,42 @@ def test_create_dcoder_agent_loads_async_subagents_by_default(
     assert any(sub.get("name") == "async_researcher" for sub in subagents)
 
 
+@patch("deepagents.create_deep_agent")
+@patch("dcoder.subagents.get_built_in_subagents")
+@patch("dcoder.subagents.list_subagents")
+def test_create_dcoder_agent_sets_empty_subagent_interrupt_on_auto_approve(
+    mock_list_subagents, mock_get_built_in, mock_create_deep_agent
+):
+    """Verify that auto_approve=True still sets explicit interrupt_on={} opt-out on subagents."""
+    mock_list_subagents.return_value = []
+    mock_get_built_in.return_value = [{"name": "dummy_subagent", "description": "dummy"}]
+    mock_create_deep_agent.return_value = MagicMock()
+
+    from langchain_core.language_models import BaseChatModel
+    fake_model = MagicMock(spec=BaseChatModel)
+
+    create_dcoder_agent(
+        model=fake_model,
+        interactive=True,
+        auto_approve=True,
+    )
+
+    call_kwargs = mock_create_deep_agent.call_args.kwargs
+    subagents = call_kwargs.get("subagents")
+    assert subagents is not None
+
+    dummy = next(sub for sub in subagents if sub["name"] == "dummy_subagent")
+    assert dummy.get("interrupt_on") == {}
+
+    gp = next(sub for sub in subagents if sub["name"] == "general-purpose")
+    assert gp.get("interrupt_on") == {}
+
+
+def test_async_hitl_middleware_class_name():
+    """Verify AsyncApprovalHITLMiddleware and AutoModeHITLMiddleware expose class attribute name."""
+    from dcoder.middleware.auto_mode_hitl import AsyncApprovalHITLMiddleware, AutoModeHITLMiddleware
+
+    assert AsyncApprovalHITLMiddleware.name == "HumanInTheLoopMiddleware"
+    assert AutoModeHITLMiddleware.name == "HumanInTheLoopMiddleware"
+
+

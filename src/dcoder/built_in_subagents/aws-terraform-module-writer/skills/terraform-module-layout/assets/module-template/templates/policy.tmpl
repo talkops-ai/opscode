@@ -1,0 +1,89 @@
+{
+  "Version": "2012-10-17",
+  "Id": "resource-access-policy",
+  "Statement": [
+    {
+      "Sid": "AllowSSLRequestsOnly",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "*",
+      "Resource": [
+        "${resource_arn}/*",
+        "${resource_arn}"
+      ],
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    },
+    {
+      "Sid": "KeyManagementPermissions",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::${account_id}:root"
+      },
+      "Action": [
+        "kms:Describe*",
+        "kms:Get*",
+        "kms:List*"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "ArnLike": {
+          "aws:PrincipalArn": [
+            "arn:aws:iam::${account_id}:role/admin",
+            "arn:aws:iam::${account_id}:role/Infra-Provisioner"
+          ]
+        }
+      }
+    }%{ if length(trusted_roles) > 0 },
+    {
+      "Sid": "TrustedRoleAccess",
+      "Effect": "Allow",
+      "Principal": ${ jsonencode({
+        "AWS": [ for role in trusted_roles : role ]
+      })},
+      "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ],
+      "Resource": "*"
+    }%{ endif }%{ if length(trusted_services) > 0 },
+    {
+      "Sid": "ServiceBasedAccess",
+      "Effect": "Allow",
+      "Principal": ${ jsonencode({
+        "Service": [ for svc in trusted_services : svc ]
+      })},
+      "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:DescribeKey"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:CallerAccount": "${account_id}"
+        }
+      }
+    }%{ endif }%{ if length(cross_account_arns) > 0 },
+    {
+      "Sid": "CrossAccountAccess",
+      "Effect": "Allow",
+      "Principal": ${ jsonencode({
+        "AWS": [ for arn in cross_account_arns : arn ]
+      })},
+      "Action": [
+        "kms:Decrypt",
+        "kms:DescribeKey",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*"
+      ],
+      "Resource": "*"
+    }%{ endif }
+  ]
+}

@@ -24,6 +24,7 @@ def list_skills(
     user_skills_dir: Path | None = None,
     project_skills_dir: Path | None = None,
     include_plugins: bool = True,
+    project_root: Path | None = None,
 ) -> list[ExtendedSkillMetadata]:
     """List skills from built-in, user, project, and plugin directories."""
     all_skills: dict[str, ExtendedSkillMetadata] = {}
@@ -37,15 +38,25 @@ def list_skills(
     if include_plugins:
         try:
             from dcoder.plugins import discover_marketplace_plugins
+            from dcoder.plugins.project_plugins import _has_agents, load_project_plugins
 
-            res = discover_marketplace_plugins()
+            res = discover_marketplace_plugins(project_root=project_root)
             for plugin in res.plugins:
+                if _has_agents(plugin.inventory):
+                    continue  # Agent plugin skills belong exclusively to their subagent
                 root = getattr(plugin, "root", None)
                 if root and isinstance(root, Path):
                     skills_dir = root / "skills"
                     if skills_dir.is_dir():
                         p_id = getattr(plugin, "plugin_id", getattr(plugin, "name", "plugin"))
                         sources.append((skills_dir, "plugin", p_id))
+
+            if project_root:
+                proj_res = load_project_plugins(project_root)
+                for skill_src, label, p_id in proj_res.main_skill_sources:
+                    sd = Path(skill_src)
+                    if sd.is_dir():
+                        sources.append((sd, "plugin", p_id))
         except Exception as exc:
             logger.debug("Plugin skill discovery skipped in loader: %s", exc)
 

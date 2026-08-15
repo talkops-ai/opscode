@@ -107,7 +107,7 @@ class ApprovalModalScreen(ModalScreen[ApprovalDecided]):
             with VerticalScroll(id="modal-args-scroll"):
                 if rendered.diff_lines:
                     patch = "\n".join(rendered.diff_lines)
-                    yield Static(compose_diff_lines(patch))
+                    yield from compose_diff_lines(patch)
                 else:
                     details = rendered.details or [f"{k}: {v}" for k, v in self._args.items()]
                     yield Static("\n".join(details))

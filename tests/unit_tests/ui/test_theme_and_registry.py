@@ -66,9 +66,9 @@ def test_command_registry():
     assert quit_cmd is not None
     assert quit_cmd.bypass_tier == BypassTier.ALWAYS
 
-    plan_cmd = get_command("/plan")
-    assert plan_cmd is not None
-    assert plan_cmd.bypass_tier == BypassTier.QUEUED
+    clear_cmd = get_command("/clear")
+    assert clear_cmd is not None
+    assert clear_cmd.bypass_tier == BypassTier.QUEUED
 
     assert "/quit" in ALWAYS_IMMEDIATE
     assert "/force-clear" in ALWAYS_IMMEDIATE

@@ -66,10 +66,11 @@ class PluginsHandler(BaseCommandHandler):
 
         # Fallback: list discovered marketplace plugins in CLI mode
         from dcoder.plugins import discover_marketplace_plugins, list_available_plugins
-        result = discover_marketplace_plugins()
+        _project_root = getattr(ctx.settings, "project_root", None) if ctx.settings else None
+        result = discover_marketplace_plugins(project_root=_project_root)
         plugins = result.plugins
         if not plugins:
-            available = list_available_plugins()
+            available = list_available_plugins(project_root=_project_root)
             if available:
                 lines = ["🔌 **Available Plugins:**\n"]
                 for p_id, desc, enabled in available:

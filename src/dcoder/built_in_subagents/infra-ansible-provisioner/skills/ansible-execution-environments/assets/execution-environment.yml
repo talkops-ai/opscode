@@ -1,0 +1,23 @@
+---
+version: 3
+
+images:
+  base_image:
+    name: quay.io/ansible/ansible-runner:latest
+  builder_image:
+    name: quay.io/ansible/ansible-builder:latest
+
+dependencies:
+  galaxy: requirements.yml
+  python: requirements.txt
+  system: bindep.txt
+
+options:
+  package_manager_path: /usr/bin/microdnf
+
+additional_build_steps:
+  prepend_base:
+    - RUN microdnf update -y
+  append_final:
+    - RUN useradd -u 1000 -g 0 runner
+    - USER 1000

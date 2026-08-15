@@ -39,7 +39,31 @@ from dcoder.ui.status import StatusBar
 from dcoder.ui.subagent_panel import SubagentColumn, SubagentPanel
 from dcoder.ui.textual_adapter import TextualAdapter
 from dcoder.ui.toast import ToastNotification, show_toast
+from dcoder.ui.ui_help import (
+    show_agents_help,
+    show_auth_help,
+    show_config_help,
+    show_doctor_help,
+    show_help,
+    show_list_help,
+    show_mcp_config_help,
+    show_mcp_help,
+    show_mcp_login_help,
+    show_plugins_help,
+    show_reset_help,
+    show_skills_help,
+    show_skills_info_help,
+    show_skills_list_help,
+    show_skills_trust_help,
+    show_threads_delete_help,
+    show_threads_help,
+    show_threads_list_help,
+    show_tools_help,
+    show_tools_install_help,
+    show_tools_list_help,
+)
 from dcoder.ui.welcome import WelcomeBanner
+from dcoder.ui.welcome_popup import WelcomeDetailPopup
 
 __all__ = [
     "ApprovalDecided",
@@ -69,8 +93,31 @@ __all__ = [
     "ToolGroupSummary",
     "UserMessage",
     "WelcomeBanner",
+    "WelcomeDetailPopup",
     "assess_tool_risk",
     "compose_diff_lines",
+    "show_agents_help",
+    "show_auth_help",
+    "show_config_help",
+    "show_doctor_help",
+    "show_help",
+    "show_list_help",
+    "show_mcp_config_help",
+    "show_mcp_help",
+    "show_mcp_login_help",
+    "show_plugins_help",
+    "show_reset_help",
+    "show_skills_help",
+    "show_skills_info_help",
+    "show_skills_list_help",
+    "show_skills_trust_help",
+    "show_threads_delete_help",
+    "show_threads_help",
+    "show_threads_list_help",
     "show_toast",
+    "show_tools_help",
+    "show_tools_install_help",
+    "show_tools_list_help",
 ]
+
 

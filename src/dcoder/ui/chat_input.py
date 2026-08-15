@@ -627,6 +627,73 @@ class ChatInput(Widget):
         """Handle key presses — intercept submit/history, delegate rest to TextArea."""
         key = event.key
 
+        # If an approval menu or inline prompt is pending on the app, forward keys directly
+        try:
+            app = getattr(self, "_app", None) or self.app
+        except Exception:
+            app = getattr(self, "_app", None)
+        pending_approval = getattr(app, "_pending_approval_widget", None) if app is not None else None
+        if pending_approval is not None and getattr(pending_approval, "is_mounted", False) and getattr(pending_approval, "display", True):
+            if key in ("up", "k"):
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_move_up()
+                return True
+            if key in ("down", "j"):
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_move_down()
+                return True
+            if key == "enter":
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_select()
+                return True
+            if key == "y":
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_select_approve()
+                return True
+            if key == "a":
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_select_auto()
+                return True
+            if key in ("n", "escape"):
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_select_reject()
+                return True
+            if key == "1":
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_select_position(0)
+                return True
+            if key == "2":
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_select_position(1)
+                return True
+            if key == "3":
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_select_position(2)
+                return True
+            if key == "e":
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_toggle_expand()
+                return True
+            if key == "tab":
+                event.prevent_default()
+                event.stop()
+                pending_approval.action_reject_with_reason()
+                return True
+            if not getattr(pending_approval, "_reason_input_active", False):
+                event.prevent_default()
+                event.stop()
+                return True
+
         # Delegate to completion manager
         cursor_idx = self._text_area.cursor_location[1] # Only works if single line or at end. Actually, textual TextArea has get_cursor_location_from_index or similar? Wait, the reference chat_input handles this differently. Let's just calculate index.
         lines = self._text_area.document.lines

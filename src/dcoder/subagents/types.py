@@ -1,6 +1,6 @@
 """Type definitions for subagent metadata."""
 
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 class SubagentMetadata(TypedDict):
     """Metadata for a custom subagent loaded from filesystem."""
@@ -10,6 +10,10 @@ class SubagentMetadata(TypedDict):
     model: NotRequired[str | None]
     skills: NotRequired[list[str] | None]
     tools: NotRequired[list[str] | None]
+    mcp_config: NotRequired[dict[str, Any] | None]
+    mcp_files: NotRequired[list[str] | None]
+    middleware: NotRequired[list[Any] | None]
+    permission_tier: NotRequired[str | None]
     source: str
     path: str
 

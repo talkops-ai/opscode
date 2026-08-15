@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Sequence, Set as AbstractSet
-from typing import TYPE_CHECKING, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from textual import work
 from textual.binding import Binding, BindingType
@@ -42,10 +42,11 @@ from dcoder.plugins.marketplace import (
     redact_marketplace_source,
     redact_urls_in_text,
 )
-from dcoder.plugins.models import LocalPluginSource, PluginInstance, PluginMarketplace, split_plugin_id
+from dcoder.plugins.models import InstallScope, LocalPluginSource, PluginInstance, PluginMarketplace, split_plugin_id
 from dcoder.plugins.store import (
     get_primary_install_entry,
-    load_enabled_plugin_ids,
+    load_all_enabled_plugin_ids,
+    load_installed_plugin_entries,
     load_installed_plugins,
     load_marketplace_records,
 )
@@ -91,6 +92,7 @@ class _PluginRow:
     unsupported_components: tuple[UnsupportedComponent, ...] = ()
     session_loaded: bool = False
     load_error: str | None = None
+    scope: InstallScope | None = None
 
     @property
     def load_state(self) -> PluginLoadState:
@@ -198,11 +200,23 @@ def _plugin_prompt(row: _PluginRow, *, status: str | None) -> Content:
     )
 
 
-def _install_details_options() -> list[Option]:
-    return [
-        Option("Install", id="action:install"),
-        Option("Back to plugin list", id="details-back"),
+def _install_details_options(*, has_project: bool) -> list[Option]:
+    options = [
+        Option("Install for you", id="action:install-user"),
     ]
+    if has_project:
+        options.extend([
+            Option(
+                "Install for all collaborators on this repository",
+                id="action:install-project",
+            ),
+            Option(
+                "Install for you, in this repo only",
+                id="action:install-local",
+            ),
+        ])
+    options.append(Option("Back to plugin list", id="details-back"))
+    return options
 
 
 def _installed_details_options(row: _PluginRow, *, divider_width: int) -> list[Option]:
@@ -365,12 +379,17 @@ def _load_manager_state(
     mcp_server_info: Sequence[MCPServerInfo] = (),
     *,
     loaded_plugin_ids: AbstractSet[str] = frozenset(),
+    project_root: Path | None = None,
 ) -> _ManagerState:
-    records = load_marketplace_records()
-    enabled = load_enabled_plugin_ids()
+    records = load_marketplace_records(project_root=project_root)
+    enabled = load_all_enabled_plugin_ids(project_root=project_root)
     installed = load_installed_plugins()
+    all_entries = load_installed_plugin_entries()
+    from dcoder.plugins.store import load_all_disabled_plugin_ids
+
+    disabled = load_all_disabled_plugin_ids(project_root=project_root)
     errors: list[str] = []
-    plugin_result = discover_marketplace_plugins()
+    plugin_result = discover_marketplace_plugins(project_root=project_root)
     errors.extend(plugin_result.warnings)
     discovered = {instance.plugin_id: instance for instance in plugin_result.plugins}
     available_plugins: list[_PluginRow] = []
@@ -395,15 +414,23 @@ def _load_manager_state(
                 )
             )
             continue
+
+        is_project_marketplace = record.is_project
+
+        installed_cnt = (
+            len([p for p in marketplace.plugins if f"{p.name}@{marketplace.name}" not in disabled])
+            if is_project_marketplace
+            else sum(
+                plugin_id.endswith(f"@{marketplace.name}")
+                for plugin_id in installed
+            )
+        )
         marketplaces.append(
             _MarketplaceRow(
                 marketplace.name,
                 redact_marketplace_source(record.source),
                 len(marketplace.plugins),
-                sum(
-                    plugin_id.endswith(f"@{marketplace.name}")
-                    for plugin_id in installed
-                ),
+                installed_cnt,
             )
         )
         errors.extend(
@@ -411,9 +438,20 @@ def _load_manager_state(
         )
         for plugin in marketplace.plugins:
             plugin_id = f"{plugin.name}@{marketplace.name}"
-            is_enabled = plugin_id in enabled
-            is_installed = plugin_id in installed
+            is_disabled = plugin_id in disabled
+            is_enabled = plugin_id in enabled or (is_project_marketplace and not is_disabled)
+            is_installed = plugin_id in installed or (is_project_marketplace and not is_disabled)
             instance = discovered.get(plugin_id)
+
+            if instance is None and is_project_marketplace:
+                source_root = materialize_plugin_source(marketplace, plugin)
+                if source_root is not None:
+                    from dcoder.plugins.project_plugins import _build_plugin_instance
+
+                    instance, _ = _build_plugin_instance(
+                        plugin.name, marketplace.name, source_root, plugin.name
+                    )
+
             display_name = (
                 plugin.display_name
                 or (instance.manifest.display_name if instance and instance.manifest else None)
@@ -421,6 +459,13 @@ def _load_manager_state(
             )
             author = (
                 plugin.author.get("name") if isinstance(plugin.author, dict) else plugin.author
+            )
+            # Determine scope from install entries
+            entry_list = all_entries.get(plugin_id, [])
+            scope: InstallScope | None = (
+                entry_list[0].scope
+                if entry_list
+                else ("project" if is_project_marketplace else None)
             )
             row = _PluginRow(
                 plugin_id=plugin_id,
@@ -435,6 +480,7 @@ def _load_manager_state(
                 mcp_server_names=(),
                 unsupported_components=instance.inventory.unsupported if instance else (),
                 session_loaded=plugin_id in loaded_plugin_ids,
+                scope=scope if is_installed else None,
             )
             (installed_plugins if is_installed else available_plugins).append(row)
 
@@ -589,12 +635,14 @@ class PluginManagerScreen(ModalScreen[None]):
         *,
         mcp_server_info: Sequence[MCPServerInfo] = (),
         loaded_plugin_ids: AbstractSet[str] | None = None,
+        project_root: Path | None = None,
     ) -> None:
         super().__init__()
         self._tab: PluginTab = "discover"
         self._mode: PluginManagerView = "list"
         self._mcp_server_info = mcp_server_info
         self._loaded_plugin_ids: frozenset[str] = frozenset(loaded_plugin_ids or ())
+        self._project_root = project_root
         self._state = _ManagerState((), (), (), ())
         self._status: str | None = None
         self._error: str | None = None
@@ -607,7 +655,7 @@ class PluginManagerScreen(ModalScreen[None]):
             yield Static("Plugins", id="plugin-manager-title", classes="plugin-manager-title")
             with Horizontal(id="plugin-manager-tabs", classes="plugin-manager-tabs"):
                 for tab in self._tabs:
-                    yield PluginTabLabel(cast(PluginTab, tab), TAB_LABELS[tab])
+                    yield PluginTabLabel(tab, TAB_LABELS[tab])
 
             yield Rule(
                 line_style="heavy" if not is_ascii_mode() else "ascii",
@@ -808,7 +856,7 @@ class PluginManagerScreen(ModalScreen[None]):
 
     def _active_details_options(self) -> list[Option]:
         if self._mode == "plugin_details":
-            return _install_details_options()
+            return _install_details_options(has_project=self._project_root is not None)
         if self._mode == "installed_details" and self._selected_plugin is not None:
             return _installed_details_options(
                 self._selected_plugin, divider_width=self._divider_width()
@@ -825,11 +873,12 @@ class PluginManagerScreen(ModalScreen[None]):
             _load_manager_state,
             self._mcp_server_info,
             loaded_plugin_ids=self._loaded_plugin_ids,
+            project_root=self._project_root,
         )
         self._refresh_view()
 
     def on_plugin_tab_selected(self, event: PluginTabSelected) -> None:
-        self._select_tab(cast(PluginTab, event.tab))
+        self._select_tab(event.tab)
 
 
     def action_cancel(self) -> None:
@@ -869,14 +918,14 @@ class PluginManagerScreen(ModalScreen[None]):
         if self._details_mode_active():
             return
         index = self._tabs.index(self._tab)
-        next_tab = cast(PluginTab, self._tabs[(index + 1) % len(self._tabs)])
+        next_tab = self._tabs[(index + 1) % len(self._tabs)]
         self._select_tab(next_tab)
 
     def action_previous_tab(self) -> None:
         if self._details_mode_active():
             return
         index = self._tabs.index(self._tab)
-        prev_tab = cast(PluginTab, self._tabs[(index - 1) % len(self._tabs)])
+        prev_tab = self._tabs[(index - 1) % len(self._tabs)]
         self._select_tab(prev_tab)
 
 
@@ -944,15 +993,27 @@ class PluginManagerScreen(ModalScreen[None]):
                 self._mode = "installed_details"
                 self._refresh_view()
             return
-        if option_id == "action:install":
+        if option_id in ("action:install-user", "action:install-project", "action:install-local"):
             if self._selected_plugin:
+                scope_map: dict[str, InstallScope] = {
+                    "action:install-user": "user",
+                    "action:install-project": "project",
+                    "action:install-local": "local",
+                }
+                scope = scope_map[option_id]
                 self._status = f"Installing {self._selected_plugin.label}..."
                 self._refresh_view()
                 try:
-                    await asyncio.to_thread(install_plugin, self._selected_plugin.plugin_id)
+                    await asyncio.to_thread(
+                        install_plugin,
+                        self._selected_plugin.plugin_id,
+                        scope=scope,
+                        project_root=self._project_root,
+                    )
                     self._mode = "list"
                     self._tab = "installed"
-                    self._status = f"Installed {self._selected_plugin.label}."
+                    scope_labels = {"user": "for you", "project": "for all collaborators", "local": "for you in this repo"}
+                    self._status = f"Installed {self._selected_plugin.label} ({scope_labels[scope]})."
                     await self._refresh_state()
                 except Exception as exc:
                     self._status = None
@@ -976,7 +1037,12 @@ class PluginManagerScreen(ModalScreen[None]):
                 self._status = f"Uninstalling {self._selected_plugin.label}..."
                 self._refresh_view()
                 try:
-                    await asyncio.to_thread(uninstall_plugin, self._selected_plugin.plugin_id)
+                    await asyncio.to_thread(
+                        uninstall_plugin,
+                        self._selected_plugin.plugin_id,
+                        scope=self._selected_plugin.scope,
+                        project_root=self._project_root,
+                    )
                     self._mode = "list"
                     self._selected_plugin = None
                     self._status = "Plugin uninstalled."

@@ -49,19 +49,22 @@ class HelpHandler(BaseCommandHandler):
                 "/resume, /scrollbar, /timestamps, /version, /skill:<name>"
             )
 
+        from dcoder.config.settings import newline_shortcut
+
+        nl_shortcut = newline_shortcut()
         help_body = (
             f"Commands: {commands_str}\n\n"
-            "Interactive Features:\n"
-            "  Enter            Submit your message\n"
-            "  Option+Enter     Insert newline\n"
-            "  Ctrl+X           Open prompt in external editor\n"
-            "  Ctrl+N           Review pending notifications\n"
-            "  Ctrl+\\          Toggle the debug console\n"
-            "  Shift+Tab        Toggle auto-approve mode\n"
-            "  @filename        Auto-complete files and inject content\n"
-            "  /command         Slash commands (/help, /clear, /quit)\n"
-            "  !command         Run shell commands directly\n"
-            "  !!command        Run shell commands without adding command/output to model context\n\n"
+            "Interactive Features:  \n"
+            "  Enter           Submit your message  \n"
+            f"  {nl_shortcut:<15} Insert newline  \n"
+            "  Ctrl+X          Open prompt in external editor  \n"
+            "  Ctrl+N          Review pending notifications  \n"
+            "  Ctrl+\\          Toggle the debug console  \n"
+            "  Shift+Tab       Toggle auto-approve mode  \n"
+            "  @filename       Auto-complete files and inject content  \n"
+            "  /command        Slash commands (/help, /clear, /quit)  \n"
+            "  !command        Run shell commands directly  \n"
+            "  !!command       Run shell commands without adding command/output to model context\n\n"
             "Docs: https://dcoder.dev/docs"
         )
 

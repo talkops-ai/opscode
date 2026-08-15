@@ -50,6 +50,7 @@ class SkillRegistry:
             built_in_skills_dir=built_in_dir,
             user_skills_dir=user_skills_dir,
             project_skills_dir=project_skills_dir,
+            project_root=settings.project_root,
         )
 
         name_pattern = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -66,10 +67,20 @@ class SkillRegistry:
             # Path traversal validation
             try:
                 resolved_path = Path(path).resolve()
-                # Must be relative to one of our roots
-                roots = [built_in_dir, user_skills_dir]
+                from dcoder.config.paths import PLUGINS_DIR
+                roots = [built_in_dir, PLUGINS_DIR]
+                if user_skills_dir:
+                    roots.append(user_skills_dir)
                 if project_skills_dir:
                     roots.append(project_skills_dir)
+                user_agents_skills = Path.home() / ".agents" / "skills"
+                if user_agents_skills.is_dir():
+                    roots.append(user_agents_skills)
+                user_claude_skills = Path.home() / ".claude" / "skills"
+                if user_claude_skills.is_dir():
+                    roots.append(user_claude_skills)
+                if settings.project_root:
+                    roots.append(settings.project_root)
                 
                 is_safe = False
                 for root in roots:
@@ -98,18 +109,23 @@ class SkillRegistry:
 
     def get_sources_for_middleware(self) -> list[tuple[str, ...]]:
         """Return sources ordered by lowest to highest precedence (Tier 1 to Tier 7) for SkillsMiddleware."""
+        effective_project_root = settings.effective_project_root
+
         sources: list[tuple[str, ...]] = []
 
         # Tier 1: Built-in skills
         built_in_dir = Path(__file__).parent.parent / "built_in_skills"
         sources.append((str(built_in_dir), "Built-in"))
 
-        # Tier 2: Plugin skills (namespaced)
+        # Tier 2: Plugin skills (namespaced, non-agent plugins only)
         try:
             from dcoder.plugins import discover_marketplace_plugins
+            from dcoder.plugins.project_plugins import _has_agents, load_project_plugins
 
-            result = discover_marketplace_plugins()
+            result = discover_marketplace_plugins(project_root=effective_project_root)
             for plugin in result.plugins:
+                if _has_agents(plugin.inventory):
+                    continue  # Agent plugin skills are bound exclusively to their subagent
                 root = getattr(plugin, "root", None)
                 if root and isinstance(root, Path):
                     skills_dir = root / "skills"
@@ -122,6 +138,12 @@ class SkillRegistry:
                                 p_id,
                             )
                         )
+
+            if effective_project_root:
+                proj_res = load_project_plugins(effective_project_root)
+                for skill_src, label, p_id in proj_res.main_skill_sources:
+                    if Path(skill_src).is_dir():
+                        sources.append((skill_src, label, p_id))
         except Exception as exc:
             logger.warning("Could not discover plugin skills for middleware: %s", exc)
 
@@ -136,13 +158,13 @@ class SkillRegistry:
             sources.append((str(user_agents_skills), "User Agents"))
 
         # Tier 5: Project Deepagents skills (.dcoder/skills)
-        if settings.project_root:
-            psd = settings.get_project_skills_dir()
-            if psd:
+        if effective_project_root:
+            psd = effective_project_root / ".dcoder" / "skills"
+            if psd.is_dir():
                 sources.append((str(psd), "Project Deepagents"))
 
             # Tier 6: Project Agents skills (.agents/skills)
-            project_agents_skills = settings.project_root / ".agents" / "skills"
+            project_agents_skills = effective_project_root / ".agents" / "skills"
             if project_agents_skills.is_dir():
                 sources.append((str(project_agents_skills), "Project Agents"))
 
@@ -150,8 +172,8 @@ class SkillRegistry:
         user_claude_skills = Path.home() / ".claude" / "skills"
         if user_claude_skills.is_dir():
             sources.append((str(user_claude_skills), "Claude Experimental User"))
-        if settings.project_root:
-            project_claude_skills = settings.project_root / ".claude" / "skills"
+        if effective_project_root:
+            project_claude_skills = effective_project_root / ".claude" / "skills"
             if project_claude_skills.is_dir():
                 sources.append((str(project_claude_skills), "Claude Experimental Project"))
 

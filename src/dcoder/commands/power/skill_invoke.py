@@ -110,6 +110,7 @@ class SkillInvokeHandler(BaseCommandHandler):
                 user_skills_dir=settings.get_user_skills_dir("dcoder"),
                 project_skills_dir=settings.get_project_skills_dir(),
                 include_plugins=True,
+                project_root=settings.project_root,
             )
             for skill_item in discovered:
                 skill_dict = dict(skill_item)

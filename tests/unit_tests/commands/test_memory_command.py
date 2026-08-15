@@ -147,20 +147,15 @@ class TestMemoryCommand:
             assert res_search_none.message is not None and "No memories found matching query" in res_search_none.message
 
     def test_static_skill_alias_filtering(self):
-        """build_skill_commands filters static skill aliases like 'remember' and 'skill-creator'."""
+        """build_skill_commands filters static skill aliases like 'remember'."""
         assert "remember" in _STATIC_SKILL_ALIASES
-        assert "skill-creator" in _STATIC_SKILL_ALIASES
 
         skills = [
             {"name": "remember", "description": "Save context to memory"},
-            {"name": "skill-creator", "description": "Create skills"},
             {"name": "terraform-builder", "description": "Build terraform code"},
         ]
 
         cmds = build_skill_commands(skills)
-        cmd_names = [cmd.name for cmd in cmds]
-
-        # Built-in static aliases must be excluded from build_skill_commands
-        assert "/remember" not in cmd_names
-        assert "/skill-creator" not in cmd_names
-        assert "/terraform-builder" in cmd_names
+        names = [c.name for c in cmds]
+        assert "/remember" not in names
+        assert "/terraform-builder" in names

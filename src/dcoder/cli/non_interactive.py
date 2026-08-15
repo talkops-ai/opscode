@@ -3,17 +3,13 @@
 Connects to a LangGraph dev server subprocess via ``server_session``,
 streams agent output to stdout, handles HITL interrupts via shell-allow-list
 or auto-approve, and exits with an appropriate code.
-
-Designed for CI/CD pipelines and scripted usage::
-
-    dcoder -n "plan terraform for staging" --auto-approve
-    dcoder -n "run test suite" --shell-allow-list recommended --quiet
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -21,6 +17,9 @@ from typing import Any
 
 from rich.console import Console
 from rich.text import Text
+
+from dcoder.model.config import apply_stored_credentials
+from dcoder.model.factory import detect_provider, normalize_model_spec
 
 logger = logging.getLogger(__name__)
 
@@ -93,17 +92,13 @@ def _should_auto_approve(
     auto_approve: bool,
     shell_allow_list: list[str] | None,
 ) -> bool:
-    """Decide whether to auto-approve a tool call.
-
-    Returns ``True`` if the call should be approved, ``False`` if rejected.
-    """
+    """Decide whether to auto-approve a tool call."""
     if auto_approve:
         return True
 
     if shell_allow_list is None:
         return False
 
-    # Non-shell tools: always approve when shell_allow_list is set
     if tool_name != "execute":
         return True
 
@@ -125,6 +120,7 @@ async def run_non_interactive(
     *,
     model: str | None = None,
     model_params: dict[str, Any] | None = None,
+    profile_override: dict[str, Any] | None = None,
     assistant_id: str = "dcoder",
     auto_approve: bool = False,
     shell_allow_list: list[str] | None = None,
@@ -135,37 +131,48 @@ async def run_non_interactive(
     rubric: str | None = None,
     rubric_model: str | None = None,
     rubric_max_iterations: int | None = None,
+    recursion_limit: int | None = None,
+    initial_skill: str | None = None,
+    startup_cmd: str | None = None,
     mcp_config_path: str | None = None,
     no_mcp: bool = False,
     trust_project_mcp: bool = False,
+    enable_interpreter: bool | None = None,
+    interpreter_ptc: str | list[str] | None = None,
+    allow_fs_tools: str | list[str] | None = "all",
 ) -> int:
-    """Run a single task via LangGraph dev server, stream to stdout, exit.
-
-    Args:
-        prompt: The user's task prompt.
-        model: Model identifier (e.g. ``"anthropic:claude-sonnet-4"``).
-        model_params: Extra model parameters.
-        assistant_id: Agent identity.
-        auto_approve: Approve all tool calls automatically.
-        shell_allow_list: Allowed shell commands list.
-        quiet: Suppress diagnostics.
-        no_stream: Buffer full response.
-        max_turns: Maximum agent turns safety cap.
-        timeout: Timeout in seconds safety cap.
-        rubric: Acceptance criteria text.
-        rubric_model: Model for rubric grading.
-        rubric_max_iterations: Max rubric grading iterations.
-        mcp_config_path: Path to MCP config file.
-        no_mcp: Disable all MCP servers.
-        trust_project_mcp: Auto-trust project MCP servers.
-
-    Returns:
-        Exit code: 0 for success, 1 for error.
-    """
+    """Run a single task via LangGraph dev server, stream to stdout, exit."""
     from dcoder.cli.server_manager import server_session
 
-    # Console writes to stderr so stdout is clean for agent output
-    console = Console(stderr=True) if quiet else Console(stderr=True)
+    console = Console(stderr=True)
+
+    # Run startup command if specified
+    if startup_cmd:
+        try:
+            if not quiet:
+                console.print(f"[dim]Running startup command: {startup_cmd}[/dim]")
+            proc = subprocess.run(startup_cmd, shell=True, capture_output=True, text=True)
+            if proc.stdout and not quiet:
+                console.print(proc.stdout.strip(), style="dim")
+            if proc.returncode != 0 and not quiet:
+                console.print(f"[yellow]Startup command exited with non-zero code: {proc.returncode}[/yellow]")
+        except Exception as exc:
+            if not quiet:
+                console.print(f"[yellow]Startup command failed: {exc}[/yellow]")
+
+    # Normalize model and apply credentials
+    model_spec = normalize_model_spec(model) if model else None
+    if model_spec:
+        provider = model_spec.split(":", 1)[0] if ":" in model_spec else (detect_provider(model_spec) or "openai")
+        try:
+            apply_stored_credentials(provider)
+        except Exception:
+            pass
+
+    # Prepend skill if provided
+    final_prompt = prompt
+    if initial_skill:
+        final_prompt = f"Use the skill '{initial_skill}' for this task: {prompt}"
 
     state = StreamState(quiet=quiet, stream=not no_stream)
     start_time = time.monotonic()
@@ -173,7 +180,7 @@ async def run_non_interactive(
     try:
         async with server_session(
             assistant_id=assistant_id,
-            model_name=model,
+            model_name=model_spec,
             model_params=model_params,
             auto_approve=auto_approve,
             shell_allow_list=shell_allow_list,
@@ -184,32 +191,26 @@ async def run_non_interactive(
         ) as (client, server):
             turn_count = 0
             hitl_iterations = 0
-            thread_id = None  # Will be assigned by first run
 
             # Create a new thread
             thread = await client.threads.create()
             thread_id = thread["thread_id"]
 
-            # Initial agent invocation
-            input_msg = {"messages": [{"role": "user", "content": prompt}]}
+            input_msg = {"messages": [{"role": "user", "content": final_prompt}]}
 
             while True:
                 # Safety caps
                 if max_turns is not None and turn_count >= max_turns:
                     if not quiet:
-                        console.print(
-                            f"[yellow]Reached max-turns limit ({max_turns})[/yellow]"
-                        )
+                        console.print(f"[yellow]Reached max-turns limit ({max_turns})[/yellow]")
                     break
 
                 if timeout is not None:
                     elapsed = time.monotonic() - start_time
                     if elapsed >= timeout:
                         if not quiet:
-                            console.print(
-                                f"[yellow]Reached timeout ({timeout}s)[/yellow]"
-                            )
-                        break
+                            console.print(f"[yellow]Reached timeout ({timeout}s)[/yellow]")
+                        return 124
 
                 # Stream the agent turn
                 state.interrupt_occurred = False
@@ -252,7 +253,6 @@ async def run_non_interactive(
                 next_tasks = thread_state.get("next", [])
 
                 if not next_tasks:
-                    # Agent finished
                     break
 
                 # Handle HITL interrupt
@@ -261,19 +261,14 @@ async def run_non_interactive(
                     hitl_iterations += 1
                     if hitl_iterations > _MAX_HITL_ITERATIONS:
                         if not quiet:
-                            console.print(
-                                "[red]HITL iteration limit reached[/red]"
-                            )
+                            console.print("[red]HITL iteration limit reached[/red]")
                         return 1
 
-                    # Auto-resolve all pending interrupts
                     decisions = []
                     for task in interrupts:
                         interrupt_data = task.get("interrupts", [])
                         for interrupt in interrupt_data:
-                            tool_name = interrupt.get("value", {}).get(
-                                "tool_name", ""
-                            )
+                            tool_name = interrupt.get("value", {}).get("tool_name", "")
                             tool_args = interrupt.get("value", {}).get("args", {})
 
                             approved = _should_auto_approve(
@@ -288,12 +283,7 @@ async def run_non_interactive(
                             if not quiet:
                                 icon = "✓" if approved else "✗"
                                 style = "green" if approved else "red"
-                                console.print(
-                                    Text(
-                                        f"  {icon} {decision}: {tool_name}",
-                                        style=style,
-                                    )
-                                )
+                                console.print(Text(f"  {icon} {decision}: {tool_name}", style=style))
 
                     # Resume with decisions
                     await client.runs.create(

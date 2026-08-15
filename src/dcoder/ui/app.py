@@ -28,6 +28,7 @@ except ImportError:
     pass
 
 import asyncio
+import inspect
 import logging
 import sys
 import time
@@ -182,6 +183,8 @@ class DCoderApp(App):
         Binding("ctrl+l", "clear_chat", "Clear", show=False),
         Binding("shift+tab", "toggle_auto_approve", "Auto-approve", show=False),
         Binding("ctrl+\\", "toggle_debug_console", "Debug", show=False),
+        Binding("ctrl+x", "open_editor", "External Editor", show=False),
+        Binding("ctrl+n", "open_notifications", "Notifications", show=False),
         # Approval menu keys (handled at App level for reliability)
         Binding("up", "approval_up", "Up", show=False),
         Binding("k", "approval_up", "Up", show=False),
@@ -226,6 +229,9 @@ class DCoderApp(App):
         auto_approve: bool = False,
         resume_thread: str | None = None,
         goal: str | None = None,
+        initial_prompt: str | None = None,
+        initial_skill: str | None = None,
+        startup_cmd: str | None = None,
         defer_server_start: bool = False,
         server_kwargs: dict[str, Any] | None = None,
         mcp_server_info: list | None = None,
@@ -259,6 +265,9 @@ class DCoderApp(App):
         self._auto_approve = auto_approve
         self._resume_thread = resume_thread
         self._goal = goal
+        self._initial_prompt = initial_prompt
+        self._initial_skill = initial_skill
+        self._startup_cmd = startup_cmd
         self._agent_thread_id: str | None = None
         self._cwd: str = str(Path.cwd())
         self._status_bar: StatusBar | None = None
@@ -285,6 +294,7 @@ class DCoderApp(App):
         self._pending_goal_review_widget: Any | None = None
         self._pending_goal_review_future: Any | None = None
         self._pending_approval_widget: Any | None = None
+        self._approval_placeholder: Any | None = None
 
         # ── Worker Handles ───────────────────────────────
         self._agent_worker: Worker[None] | None = None
@@ -294,6 +304,7 @@ class DCoderApp(App):
         # ── Queue ────────────────────────────────────────
         self._pending_messages: deque[QueuedMessage] = deque()
         self._queued_widgets: deque[QueuedUserMessage] = deque()
+        self._pending_shell_messages: list[Any] = []
         self._processing_pending = False
 
         # ── Adapter & Widgets ────────────────────────────
@@ -393,6 +404,7 @@ class DCoderApp(App):
             set_spinner=self._set_spinner,
             on_subagent_event=self._on_subagent_event,
             app=self,
+            request_approval=self._request_approval,
         )
 
         self._chat_input = self.query_one("#input-area", ChatInput)
@@ -415,12 +427,6 @@ class DCoderApp(App):
             # Deferred server startup — TUI is visible immediately
             status_bar.set_status("Connecting...")
             self._startup_sequence_running = True
-            await self._mount_message(
-                SystemMessage(
-                    "⏳ **Starting agent server...** The TUI is ready — "
-                    "the server will connect in the background."
-                )
-            )
             self.run_worker(self._start_server_background(), group="server-startup")
         elif self._client:
             # Eagerly-provided client (e.g. tests or pre-started server)
@@ -458,12 +464,31 @@ class DCoderApp(App):
 
         if self._loading_widget is None or not getattr(self._loading_widget, "is_attached", False):
             self._loading_widget = LoadingWidget(status)
-            messages.mount(self._loading_widget)
+            await messages.mount(self._loading_widget)
         else:
             if hasattr(self._loading_widget, "resume"):
                 self._loading_widget.resume()
             if hasattr(self._loading_widget, "set_status"):
                 self._loading_widget.set_status(status)
+
+    def _pause_loading_spinner_for_approval(self) -> None:
+        """Pause the global spinner timer and subagent panel timer while approval is visible."""
+        if self._loading_widget is not None and hasattr(self._loading_widget, "pause"):
+            self._loading_widget.pause()
+        subagent_panel = self._get_subagent_panel()
+        if subagent_panel is not None and hasattr(subagent_panel, "pause"):
+            subagent_panel.pause()
+
+    def _resume_loading_spinner_after_approval(
+        self,
+        _future: asyncio.Future[Any] | None = None,
+    ) -> None:
+        """Resume the global spinner timer and subagent panel timer after approval decision."""
+        if self._loading_widget is not None and hasattr(self._loading_widget, "resume"):
+            self._loading_widget.resume()
+        subagent_panel = self._get_subagent_panel()
+        if subagent_panel is not None and hasattr(subagent_panel, "resume"):
+            subagent_panel.resume()
 
     # ── Widget Mount Helper ──────────────────────────────
 
@@ -556,13 +581,14 @@ class DCoderApp(App):
         self._connecting = False
         self._startup_sequence_running = False
 
-        await self._mount_message(
-            SystemMessage(
-                "🚀 **Agent server connected!** "
-                "Type `/help` for slash commands or enter a prompt."
-            )
-        )
         logger.debug("TUI: server ready, client bound to adapter")
+
+        # Transition the welcome banner status indicator to green.
+        try:
+            banner = self.query_one(WelcomeBanner)
+            banner.set_connected()
+        except Exception:
+            pass  # Banner may have been dismissed already
 
         # Restore focus to input after async server startup
         if self._chat_input:
@@ -628,7 +654,21 @@ class DCoderApp(App):
             pass
         logger.debug("TUI: connection finalized, thread_id=%s", self._agent_thread_id)
 
+        if self._startup_cmd:
+            await self._mount_message(SystemMessage(f"⚡ Running startup command: `{self._startup_cmd}`"))
+            await self._submit_input(self._startup_cmd, "shell")
+
+        if self._initial_skill:
+            await self._submit_input(f"/skill {self._initial_skill}", "normal")
+
+        if self._initial_prompt:
+            await self._submit_input(self._initial_prompt, "normal")
+
+        if self._goal:
+            await self._send_goal()
+
     async def _send_goal(self) -> None:
+        """Submit the initial goal objective if present."""
         if self._goal:
             await self._submit_input(self._goal, "normal")
 
@@ -641,6 +681,15 @@ class DCoderApp(App):
     @on(ChatInput.SlashCommandEnded)
     def _on_slash_ended(self, event: ChatInput.SlashCommandEnded) -> None:
         """Autocomplete is now managed inline by ChatInput — no app-level action needed."""
+
+    @on(ChatInput.ModeChanged)
+    def _on_chat_input_mode_changed(self, event: ChatInput.ModeChanged) -> None:
+        """Update status bar when input mode changes."""
+        try:
+            status_bar = self.query_one("#status-bar", StatusBar)
+            status_bar.set_mode(event.mode)
+        except Exception:
+            pass
 
     @on(AutocompletePopup.CommandSelected)
     def _on_command_selected(self, event: AutocompletePopup.CommandSelected) -> None:
@@ -844,6 +893,7 @@ class DCoderApp(App):
 
         # Check if agent is available
         if self._adapter and self._adapter.connected and self._agent_thread_id:
+            await self._flush_pending_shell_messages()
             self._agent_running = True
 
             if self._chat_input:
@@ -1604,10 +1654,14 @@ class DCoderApp(App):
                 output += f"\n[stderr]\n{stderr_text}"
 
             if output:
-                messages = self.query_one("#messages", MessageList)
-                messages.start_assistant_message()
-                messages.append_assistant_token(f"```text\n{output}\n```")
-                messages.finish_assistant_message()
+                if incognito:
+                    await self._mount_message(
+                        SystemMessage(f"```text\n{output}\n```")
+                    )
+                else:
+                    await self._mount_message(
+                        AssistantMessage(f"```text\n{output}\n```")
+                    )
             else:
                 await self._mount_message(
                     SystemMessage("Command completed (no output)")
@@ -1617,6 +1671,9 @@ class DCoderApp(App):
                 await self._mount_message(
                     ErrorMessage(f"Exit code: {proc.returncode}")
                 )
+
+            if not incognito:
+                self._buffer_shell_for_model_context(command, output, proc.returncode)
 
         except asyncio.CancelledError:
             logger.debug("Shell task cancelled")
@@ -1781,32 +1838,187 @@ class DCoderApp(App):
                     SystemMessage(f"Current Goal: `{self._goal or 'None'}`")
                 )
 
-        # ── DevOps Commands Placeholder ──────────────────
-        elif cmd_name == "/plan":
-            await self._handle_user_message(f"Run terraform plan on {arg or '.'}")
 
-        elif cmd_name == "/apply":
-            await self._handle_user_message(f"Run terraform apply on {arg or '.'}")
 
-        elif cmd_name == "/kctx":
-            await self._handle_user_message(f"Show kubernetes context {arg}")
+    # ── Runtime Command Handlers ──────────────────────────
 
-        elif cmd_name == "/pods":
-            await self._handle_user_message(
-                f"Get kubernetes pods in namespace {arg or 'default'}"
+    async def _invoke_reload(self, *, command: str | None = None) -> None:
+        """Perform hot-reload of config, themes, skills, and plugins."""
+        if command is not None:
+            await self._mount_message(UserMessage(command))
+
+        discovered = getattr(self, "_discovered_skills", [])
+        old_skill_names = {
+            str(s.get("name", "")) for s in (discovered if isinstance(discovered, list) else [])
+        }
+
+        # 1. Reload settings from env
+        from dcoder.config.settings import settings as global_settings
+        try:
+            changes = global_settings.reload_from_environment()
+        except Exception as exc:
+            await self._mount_message(ErrorMessage(f"Failed to reload configuration: {exc}"))
+            return
+
+        # 2. Reload theme registry
+        try:
+            from dcoder.ui.theme import register_app_themes
+            register_app_themes(self)
+        except Exception as exc:
+            logger.warning("Theme reload warning: %s", exc)
+
+        # 3. Re-discover skills & compute diff
+        discover_async = getattr(self, "_discover_skills_async", None)
+        discover_sync = getattr(self, "_discover_skills", None)
+        if callable(discover_async):
+            await cast(Any, discover_async())
+        elif callable(discover_sync):
+            try:
+                discover_sync()
+            except Exception:
+                pass
+
+        new_discovered = getattr(self, "_discovered_skills", [])
+        new_skill_names = {
+            str(s.get("name", "")) for s in (new_discovered if isinstance(new_discovered, list) else [])
+        }
+        added_skills = sorted(new_skill_names - old_skill_names)
+        removed_skills = sorted(old_skill_names - new_skill_names)
+
+        # 4. Build summary report
+        report = "Configuration reloaded."
+        if changes:
+            report += "\nChanges:\n" + "\n".join(f"  • {c}" for c in changes)
+        else:
+            report += " No config changes detected."
+
+        if added_skills or removed_skills:
+            report += "\nSkills updated:"
+            if added_skills:
+                report += f"\n  • Added: {', '.join(added_skills)}"
+            if removed_skills:
+                report += f"\n  • Removed: {', '.join(removed_skills)}"
+
+        await self._mount_message(SystemMessage(report))
+
+    async def _handle_restart_command(self, command: str) -> None:
+        """Quiesce workers and restart the agent server process."""
+        await self._mount_message(UserMessage(command))
+
+        if self._agent_running and self._agent_worker:
+            self._agent_worker.cancel()
+            self._agent_running = False
+        else:
+            self._pending_messages.clear()
+            self._queued_widgets.clear()
+
+        restarted = False
+        restart_fn = getattr(self, "_restart_server_proc", None)
+        if callable(restart_fn):
+            restarted = bool(await cast(Any, restart_fn()))
+        elif self._server_proc is not None and hasattr(self._server_proc, "restart"):
+            try:
+                restarted = bool(await asyncio.to_thread(self._server_proc.restart))
+            except Exception as exc:
+                logger.warning("Server proc restart error: %s", exc)
+
+        if restarted:
+            await self._mount_message(SystemMessage("Agent server restarted successfully."))
+        else:
+            await self._mount_message(SystemMessage("Agent server restarted."))
+
+    async def _handle_install_command(self, command: str) -> None:
+        """Execute in-app package installation and auto-reload."""
+        await self._mount_message(UserMessage(command))
+        parts = command.strip().split()
+        if len(parts) < 2:
+            await self._mount_message(
+                SystemMessage(
+                    "Usage: /install <extra> [--force]\n"
+                    "       /install <package> --package [--force]\n\n"
+                    "Example: /install quickjs\n"
+                    "         /install daytona"
+                )
             )
+            return
 
-        elif cmd_name == "/deploy":
-            await self._handle_user_message(
-                f"Trigger deployment for {arg or 'current project'}"
+        target = parts[1]
+        is_pkg = "--package" in parts[1:]
+        force = "--force" in parts[1:]
+
+        await self._mount_message(SystemMessage(f"Installing `{target}`..."))
+
+        import shutil
+        installer = "uv" if shutil.which("uv") else "pip"
+        if installer == "uv" and not is_pkg:
+            cmd_args = ["uv", "tool", "install", "--reinstall", "-U", f"dcoder[{target}]"]
+        elif installer == "uv" and is_pkg:
+            cmd_args = ["uv", "pip", "install", target]
+        else:
+            cmd_args = ["pip", "install", target]
+        if force:
+            cmd_args.append("--force")
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-
-        elif cmd_name == "/infra":
-            panel = self.query(InfraStatePanel)
-            if panel:
-                panel.first().remove()
+            stdout, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                await self._mount_message(
+                    SystemMessage(f"Successfully installed `{target}`. Triggering reload...")
+                )
+                await self._invoke_reload()
             else:
-                self.mount(InfraStatePanel())
+                err_text = stderr.decode().strip() or stdout.decode().strip()
+                await self._mount_message(ErrorMessage(f"Failed to install `{target}`:\n{err_text}"))
+        except Exception as exc:
+            await self._mount_message(ErrorMessage(f"Error running installer for `{target}`: {exc}"))
+
+    async def _handle_update_command(self, command: str = "/update") -> None:
+        """Check for and apply DCoder software updates."""
+        await self._mount_message(UserMessage(command))
+        parts = command.strip().split()
+        allowed = {"--prerelease", "--deps"}
+        unknown = [opt for opt in parts[1:] if opt not in allowed]
+        if unknown:
+            await self._mount_message(
+                SystemMessage(
+                    f"Unknown option(s) for /update: {' '.join(unknown)}. Usage: /update [--deps] [--prerelease]"
+                )
+            )
+            return
+
+        prerelease = "--prerelease" in parts[1:]
+        try:
+            from dcoder import __version__ as cli_version
+        except ImportError:
+            cli_version = "unknown"
+
+        await self._mount_message(SystemMessage(f"Checking updates for DCoder (current: v{cli_version})..."))
+        from dcoder.commands.power.runtime import _check_pypi_version, _perform_upgrade
+
+        latest = await asyncio.to_thread(_check_pypi_version, prerelease=prerelease)
+        if latest is None:
+            await self._mount_message(
+                SystemMessage(f"Could not determine latest version. Currently on v{cli_version}.")
+            )
+            return
+
+        if latest == cli_version:
+            await self._mount_message(
+                SystemMessage(f"DCoder v{cli_version} is on the latest version.")
+            )
+            return
+
+        await self._mount_message(SystemMessage(f"Updating DCoder v{cli_version} → v{latest}..."))
+        success, output = await asyncio.to_thread(_perform_upgrade, target_version=latest, prerelease=prerelease)
+        if success:
+            await self._mount_message(SystemMessage(f"✅ Updated DCoder to v{latest}. Run `/restart` to apply."))
+        else:
+            await self._mount_message(ErrorMessage(f"Failed to update DCoder:\n{output}"))
 
     # ── Phase 2 Helper Methods ────────────────────────────
 
@@ -2359,12 +2571,18 @@ class DCoderApp(App):
         built_in_dir = Path(__file__).parent.parent / "built_in_skills"
         user_skills_dir = settings.get_user_skills_dir("dcoder")
         project_skills_dir = settings.get_project_skills_dir()
+        project_root = (
+            getattr(self._settings, "project_root", None)
+            if hasattr(self, "_settings") and self._settings
+            else settings.project_root
+        )
 
         skills = list_skills(
             built_in_skills_dir=built_in_dir,
             user_skills_dir=user_skills_dir,
             project_skills_dir=project_skills_dir,
             include_plugins=True,
+            project_root=project_root,
         )
         return [dict(s) for s in skills]
 
@@ -2521,48 +2739,186 @@ class DCoderApp(App):
         # Tool completion is shown inline via ToolCallMessage.set_success().
         pass
 
-    @on(TextualAdapter.InterruptRaised)
-    async def _on_interrupt_raised(self, event: TextualAdapter.InterruptRaised) -> None:
-        if self._auto_approve and self._adapter:
-            self._adapter.submit_approval(event.call_id, True)
-            return
+    async def _on_auto_approve_enabled(self) -> bool:
+        """Enable Auto mode when selected in approval menu."""
+        from dcoder.approval_mode import ApprovalMode
+        return await self._set_approval_mode(ApprovalMode.AUTO)
 
+    async def _request_approval(
+        self,
+        action_requests: Any,
+        assistant_id: str | None = None,
+    ) -> asyncio.Future:
+        """Request user approval inline in the messages area.
+
+        Mounts ApprovalMenu in the messages area (inline with chat).
+        ChatInput stays visible - user can still see it.
+
+        If another approval is already pending, queue this one.
+
+        Auto-approves shell commands that are in the configured allow-list.
+
+        Args:
+            action_requests: List of action request dicts to approve
+            assistant_id: The assistant ID for display purposes
+
+        Returns:
+            A Future that resolves to the user's decision dict.
+        """
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future = loop.create_future()
+
+        # If YOLO / auto-approve is active, auto-approve immediately
+        if getattr(self, "_auto_approve", False):
+            result_future.set_result({"type": "approve"})
+            return result_future
+
+        is_auto_fallback = any(
+            isinstance(request.get("description"), str)
+            and request["description"].startswith("Auto human fallback ")
+            for request in action_requests or []
+            if isinstance(request, dict)
+        )
+        shell_allow_list = getattr(self, "_shell_allow_list", None)
+        if shell_allow_list and action_requests and not is_auto_fallback:
+            from dcoder.security.shell_safety import is_shell_command_allowed
+            all_auto_approved = True
+            approved_commands = []
+
+            for req in action_requests:
+                if isinstance(req, dict) and req.get("name") in {"execute", "run_command", "bash", "shell"}:
+                    command = req.get("args", {}).get("command", "") or req.get("args", {}).get("CommandLine", "")
+                    if is_shell_command_allowed(command, shell_allow_list):
+                        approved_commands.append(command)
+                    else:
+                        all_auto_approved = False
+                        break
+                else:
+                    all_auto_approved = False
+                    break
+
+            if all_auto_approved and approved_commands:
+                result_future.set_result({"type": "approve"})
+                try:
+                    from dcoder.ui.messages import SystemMessage
+                    messages = self.query_one("#messages", MessageList)
+                    for command in approved_commands:
+                        auto_msg = SystemMessage(f"✓ Auto-approved shell command (allow-list): {command}")
+                        await messages.mount(auto_msg)
+                except Exception:
+                    pass
+                return result_future
+
+        # If there's already a pending approval, wait for it to complete first
         if self._pending_approval_widget is not None:
             while self._pending_approval_widget is not None:
                 await asyncio.sleep(0.05)
 
-        risk = assess_tool_risk(event.tool_name, event.args)
+        self._pause_loading_spinner_for_approval()
+        result_future.add_done_callback(self._resume_loading_spinner_after_approval)
 
-        if risk == "high":
-            modal = ApprovalModalScreen(event.tool_name, event.call_id, event.args)
+        from dcoder.ui.widgets.approval import ApprovalMenu
 
-            def _on_modal_dismiss(decision: ApprovalDecided | None) -> None:
-                if self._adapter:
-                    approved = decision.approved if decision else False
-                    self._adapter.submit_approval(event.call_id, approved)
+        unique_id = f"approval-menu-{uuid.uuid4().hex[:8]}"
+        menu = ApprovalMenu(
+            action_requests,
+            assistant_id or self._assistant_id,
+            id=unique_id,
+            auto_mode_eligible=not getattr(self, "_sandbox_active", False),
+        )
+        menu.set_future(result_future)
 
-            self.push_screen(modal, callback=_on_modal_dismiss)
-        else:
+        self._pending_approval_widget = menu
+
+        if self._is_user_typing():
+            from textual.widgets import Static
+            placeholder = Static(
+                "Waiting for typing to finish...",
+                classes="approval-placeholder",
+            )
+            self._approval_placeholder = placeholder
             try:
                 messages = self.query_one("#messages", MessageList)
-                menu_id = f"approval-menu-{uuid.uuid4().hex[:8]}"
-                menu = ApprovalMenu(
-                    event.tool_name,
-                    event.call_id,
-                    event.args,
-                    id=menu_id,
-                    risk=risk,
-                    auto_mode_eligible=not getattr(self, "_sandbox_active", False),
-                )
-                self._pending_approval_widget = menu
-                messages.mount_inline_prompt(menu)
-                self.call_after_refresh(menu.scroll_visible)
-                self.call_after_refresh(menu.focus)
-            except NoMatches:
-                pass
+                res = messages.mount_inline_prompt(placeholder) if hasattr(messages, "mount_inline_prompt") else messages.mount(placeholder)
+                if inspect.isawaitable(res):
+                    await res
+                self.call_after_refresh(placeholder.scroll_visible)
+            except Exception:
+                logger.exception("Failed to mount approval placeholder")
+                self._approval_placeholder = None
+                await self._mount_approval_widget(menu, result_future)
+                return result_future
+
+            self.run_worker(
+                self._deferred_show_approval(placeholder, menu, result_future),
+                exclusive=False,
+            )
+        else:
+            await self._mount_approval_widget(menu, result_future)
+
+        return result_future
+
+    async def _mount_approval_widget(
+        self,
+        menu: ApprovalMenu,
+        result_future: asyncio.Future[dict[str, str]],
+    ) -> None:
+        """Mount the approval menu widget inline in the messages area."""
+        try:
+            messages = self.query_one("#messages", MessageList)
+            res = messages.mount_inline_prompt(menu) if hasattr(messages, "mount_inline_prompt") else messages.mount(menu)
+            if inspect.isawaitable(res):
+                await res
+            self.call_after_refresh(menu.scroll_visible)
+            self.call_after_refresh(menu.focus)
+        except Exception as e:
+            logger.exception(
+                "Failed to mount approval menu (id=%s) in messages container",
+                menu.id,
+            )
+            self._pending_approval_widget = None
+            if not result_future.done():
+                result_future.set_exception(e)
+
+    async def _deferred_show_approval(
+        self,
+        placeholder: Any,
+        menu: ApprovalMenu,
+        result_future: asyncio.Future[dict[str, str]],
+    ) -> None:
+        """Wait until user is idle, then swap placeholder for real menu."""
+        deadline = time.monotonic() + 3.0
+        while self._is_user_typing():
+            if time.monotonic() > deadline:
+                logger.warning("Timed out waiting for user to stop typing; showing approval now")
+                break
+            await asyncio.sleep(0.2)
+
+        if not getattr(placeholder, "is_attached", False):
+            logger.warning("Approval placeholder detached before menu shown (id=%s)", menu.id)
+            self._approval_placeholder = None
+            self._pending_approval_widget = None
+            if not result_future.done():
+                result_future.cancel()
+            return
+
+        self._approval_placeholder = None
+        try:
+            await placeholder.remove()
+        except Exception:
+            logger.warning("Failed to remove approval placeholder during swap", exc_info=True)
+        await self._mount_approval_widget(menu, result_future)
 
     @on(ApprovalMenu.Decided)
     async def _on_approval_menu_decided(self, event: ApprovalMenu.Decided) -> None:
+        if self._approval_placeholder is not None:
+            if getattr(self._approval_placeholder, "is_attached", False):
+                try:
+                    await self._approval_placeholder.remove()
+                except Exception:
+                    pass
+            self._approval_placeholder = None
+
         if self._pending_approval_widget is not None:
             try:
                 await self._pending_approval_widget.remove()
@@ -2579,6 +2935,7 @@ class DCoderApp(App):
         dec_type = decision.get("type")
 
         if dec_type == "auto_approve_all":
+            from dcoder.approval_mode import ApprovalMode
             await self._set_approval_mode(ApprovalMode.AUTO)
 
         if self._adapter and event.call_id:
@@ -2593,6 +2950,22 @@ class DCoderApp(App):
 
         self._focus_chat_input_after_refresh()
 
+    @on(TextualAdapter.InterruptRaised)
+    async def _on_interrupt_raised(self, event: TextualAdapter.InterruptRaised) -> None:
+        """Legacy event handler for InterruptRaised."""
+        if self._auto_approve and self._adapter:
+            self._adapter.submit_approval(event.call_id, True)
+            return
+
+        future = await self._request_approval(
+            [{"name": event.tool_name, "call_id": event.call_id, "args": event.args}],
+            self._assistant_id,
+        )
+        decision = await future
+        if self._adapter:
+            approved = decision.get("type") in {"approve", "auto_approve_all"}
+            self._adapter.submit_approval(event.call_id, approved)
+
     def _is_input_focused(self) -> bool:
         if not hasattr(self, "_chat_input") or not self._chat_input:
             return False
@@ -2603,17 +2976,17 @@ class DCoderApp(App):
 
     def action_approval_up(self) -> None:
         widget = self._pending_approval_widget
-        if widget is not None and not self._is_input_focused():
+        if widget is not None:
             widget.action_move_up()
 
     def action_approval_down(self) -> None:
         widget = self._pending_approval_widget
-        if widget is not None and not self._is_input_focused():
+        if widget is not None:
             widget.action_move_down()
 
     def action_approval_select(self) -> None:
         widget = self._pending_approval_widget
-        if widget is not None and not self._is_input_focused():
+        if widget is not None:
             widget.action_select()
 
     def action_approval_yes(self) -> None:
@@ -2710,7 +3083,7 @@ class DCoderApp(App):
         show_toast(self, event.error, title="Stream Error", severity="error")
         try:
             messages = self.query_one("#messages", MessageList)
-            messages.mount(ErrorMessage(event.error))
+            await self._mount_message(ErrorMessage(event.error))
         except NoMatches:
             pass
 
@@ -2851,6 +3224,117 @@ class DCoderApp(App):
                 self._chat_input.focus_input()
             return
         self._open_debug_console()
+
+    async def action_open_editor(self) -> None:
+        """Open the focused editable surface in $VISUAL/$EDITOR."""
+        chat_input = getattr(self, "_chat_input", None)
+        if not chat_input or not getattr(chat_input, "_text_area", None):
+            return
+
+        await self._open_text_area_in_editor(
+            chat_input._text_area,
+            chat_input._text_area.text or "",
+            allow_empty=False,
+            raise_editor_errors=False,
+            restore_focus=chat_input.focus_input,
+        )
+
+    async def _open_text_area_in_editor(
+        self,
+        text_area: Any,
+        current_text: str,
+        *,
+        allow_empty: bool,
+        raise_editor_errors: bool,
+        restore_focus: Callable[[], object],
+        reset_after_edit: Callable[[], None] | None = None,
+    ) -> None:
+        """Edit text externally, then restore originating field's focus."""
+        from dcoder.editor import ExternalEditorError, open_in_editor
+
+        try:
+            with self.suspend():
+                edited = open_in_editor(
+                    current_text,
+                    allow_empty=allow_empty,
+                    raise_on_error=raise_editor_errors,
+                )
+        except ExternalEditorError:
+            logger.warning("External editor failed", exc_info=True)
+            self.notify(
+                "External editor failed. Check $VISUAL/$EDITOR.",
+                severity="error",
+                timeout=5,
+            )
+        else:
+            if edited is not None:
+                text_area.text = edited
+                if reset_after_edit is not None:
+                    reset_after_edit()
+                lines = edited.split("\n")
+                text_area.move_cursor((len(lines) - 1, len(lines[-1])))
+        finally:
+            restore_focus()
+
+    def action_open_notifications(self) -> None:
+        """Open or toggle the notification center overlay via Ctrl+N."""
+        self._open_notification_center()
+
+    def _open_notification_center(self) -> None:
+        """Toggle the NotificationCenter panel overlay."""
+        from dcoder.ui.notification_center import NotificationCenter
+
+        try:
+            nc = self.query(NotificationCenter)
+            if nc:
+                nc.first().remove()
+            else:
+                self.mount(NotificationCenter())
+        except Exception:
+            logger.warning("Failed to toggle NotificationCenter", exc_info=True)
+
+    def _buffer_shell_for_model_context(
+        self, command: str, output: str, returncode: int | None
+    ) -> None:
+        """Buffer a non-incognito `!` command/output for the next user send."""
+        from langchain_core.messages import HumanMessage
+
+        code = returncode if returncode is not None else "unknown"
+        body = output or "(no output)"
+        content = (
+            "<user_shell_command>\n"
+            "<command>\n"
+            f"{command}\n"
+            "</command>\n"
+            "<result>\n"
+            f"Exit code: {code}\n"
+            "Output:\n"
+            f"{body}\n"
+            "</result>\n"
+            "</user_shell_command>"
+        )
+        self._pending_shell_messages.append(HumanMessage(content=content))
+
+    async def _flush_pending_shell_messages(self) -> None:
+        """Write buffered `!` command/output into thread state, then clear it."""
+        if not self._pending_shell_messages:
+            return
+        thread_id = getattr(self, "_agent_thread_id", None) or getattr(
+            getattr(self, "_session_state", None), "thread_id", None
+        )
+        agent_obj = getattr(self, "_agent", None)
+        if not agent_obj or not thread_id:
+            return
+
+        messages = self._pending_shell_messages
+        self._pending_shell_messages = []
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+        try:
+            await agent_obj.aupdate_state(config, {"messages": messages})
+        except Exception:
+            logger.warning(
+                "Failed to flush pending shell messages to model context", exc_info=True
+            )
 
     def _open_debug_console(self) -> None:
         """Push the read-only Debug Console modal."""
@@ -3425,7 +3909,11 @@ class DCoderApp(App):
         from dcoder.ui.plugin_manager import PluginManagerScreen
 
         mcp_info = self.get_mcp_servers() if hasattr(self, "get_mcp_servers") else ()
-        screen = PluginManagerScreen(mcp_server_info=mcp_info)
+        project_root = getattr(self._settings, "project_root", None) if self._settings else None
+        screen = PluginManagerScreen(
+            mcp_server_info=mcp_info,
+            project_root=project_root,
+        )
         self.push_screen(screen)
 
     # ── Skills Viewer ────────────────────────────────────
@@ -3519,7 +4007,7 @@ class DCoderApp(App):
             id=unique_id,
         )
         self._pending_goal_review_widget = menu
-        messages.mount_inline_prompt(menu)
+        self.run_worker(messages.mount_inline_prompt(menu))
 
     @on(GoalReviewMenu.Decided)
     async def _on_goal_review_decided(self, event: GoalReviewMenu.Decided) -> None:

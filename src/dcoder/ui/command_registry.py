@@ -159,7 +159,7 @@ COMMANDS: tuple[SlashCommand, ...] = (
         description="Set a persistent objective with acceptance criteria",
         bypass_tier=BypassTier.QUEUED,
         hidden_keywords="objective criteria rubric target",
-        argument_hint="[<objective>|show|clear]",
+        argument_hint="[<objective>|amend <feedback>|pause|resume|show|clear|model|max-iterations]",
     ),
     SlashCommand(
         name="/help",
@@ -172,7 +172,7 @@ COMMANDS: tuple[SlashCommand, ...] = (
         description="Manage MCP servers and connections",
         bypass_tier=BypassTier.SIDE_EFFECT_FREE,
         hidden_keywords="servers mcp tools reconnect",
-        argument_hint="[login <server> | status]",
+        argument_hint="[login <server> | reconnect [--force] | status]",
     ),
     SlashCommand(
         name="/model",
@@ -271,19 +271,6 @@ COMMANDS: tuple[SlashCommand, ...] = (
         hidden_keywords="skills tools capabilities list available installed functions",
         aliases=("/tools",),
     ),
-    SlashCommand(
-        name="/project",
-        description="Show project info and manage workspace context",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="project workspace repo directory cwd init",
-        argument_hint="[show|init|switch <path>]",
-    ),
-    SlashCommand(
-        name="/terminal-setup",
-        description="Run terminal diagnostics and show setup suggestions",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="terminal setup shell configure zsh bash install onboard first-run",
-    ),
     # ── Power User Commands (Phase 4) ──────────────────
     SlashCommand(
         name="/rubric",
@@ -308,21 +295,6 @@ COMMANDS: tuple[SlashCommand, ...] = (
         argument_hint="[<text>]",
     ),
     SlashCommand(
-        name="/btw",
-        description="Send an aside to the agent without polluting main context",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="btw aside ephemeral note",
-        argument_hint="<message>",
-        aliases=("/aside",),
-    ),
-    SlashCommand(
-        name="/tasks",
-        description="Session-scoped TODO list for tracking work items",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="tasks todo list checklist items track",
-        argument_hint="[add <text>|done <id>|rm <id>|clear]",
-    ),
-    SlashCommand(
         name="/review",
         description="Run code review on uncommitted changes",
         bypass_tier=BypassTier.QUEUED,
@@ -330,84 +302,37 @@ COMMANDS: tuple[SlashCommand, ...] = (
         aliases=("/code-review",),
     ),
     SlashCommand(
-        name="/agents",
-        description="Browse and switch between agent configurations",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="agents switch personas select",
-    ),
-    SlashCommand(
-        name="/skill-creator",
-        description="Launch the skill creation workflow",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="skill creator make new",
-    ),
-    SlashCommand(
-        name="/loop",
-        description="Run an instruction periodically at a specified interval",
-        bypass_tier=BypassTier.ALWAYS,
-        hidden_keywords="loop repeat periodic interval schedule cron",
-        argument_hint="[<interval> <instruction>|show|stop [id]]",
-    ),
-    SlashCommand(
         name="/reload",
         description="Hot-reload configuration, skills, themes, and environment",
-        bypass_tier=BypassTier.ALWAYS,
-        hidden_keywords="reload refresh config skills themes",
+        bypass_tier=BypassTier.QUEUED,
+        hidden_keywords="reload refresh config skills themes env",
     ),
     SlashCommand(
         name="/restart",
-        description="Full restart of agent session and server connections",
+        description="Immediately restart the background agent server process",
         bypass_tier=BypassTier.ALWAYS,
-        hidden_keywords="restart reset server reconnect",
+        hidden_keywords="restart reset server reconnect kill",
+    ),
+    SlashCommand(
+        name="/install",
+        description="Install an optional extra package or provider dependency",
+        bypass_tier=BypassTier.QUEUED,
+        argument_hint="<extra|package> [--package] [--force]",
+        hidden_keywords="install pip uv package add",
     ),
     SlashCommand(
         name="/update",
-        description="Check for and apply dcoder updates",
+        description="Check for and install DCoder software updates",
         bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="update upgrade version check",
-        argument_hint="[--check|--force]",
-    ),
-    # ── DevOps Specific Commands ────────────────────────
-    SlashCommand(
-        name="/plan",
-        description="Trigger Terraform plan evaluation on current directory",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="terraform tofu plan diff infra",
-        argument_hint="[module_path]",
+        argument_hint="[--deps] [--prerelease]",
+        hidden_keywords="update upgrade version check latest",
     ),
     SlashCommand(
-        name="/apply",
-        description="Trigger Terraform apply with HITL approval gate",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="terraform tofu apply deploy infra",
-        argument_hint="[module_path]",
-    ),
-    SlashCommand(
-        name="/kctx",
-        description="Show or switch Kubernetes current context",
+        name="/auto-update",
+        description="Toggle automatic update checks on startup",
         bypass_tier=BypassTier.SIDE_EFFECT_FREE,
-        hidden_keywords="kubectl k8s context namespace kubeconfig",
-        argument_hint="[context_name]",
-    ),
-    SlashCommand(
-        name="/pods",
-        description="Check status of Kubernetes pods in current context",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="kubectl k8s pods status deployments",
-        argument_hint="[namespace]",
-    ),
-    SlashCommand(
-        name="/deploy",
-        description="Trigger deployment pipeline or manifest apply",
-        bypass_tier=BypassTier.QUEUED,
-        hidden_keywords="argo helm kubectl release deploy",
-        argument_hint="[target]",
-    ),
-    SlashCommand(
-        name="/infra",
-        description="Toggle Infrastructure Context Panel sidebar",
-        bypass_tier=BypassTier.IMMEDIATE_UI,
-        hidden_keywords="panel sidebar cloud k8s context status",
+        argument_hint="[on|off|status]",
+        hidden_keywords="auto-update autoupdate check startup",
     ),
 )
 
@@ -436,7 +361,7 @@ def get_command(name_or_alias: str) -> SlashCommand | None:
     return None
 
 
-_STATIC_SKILL_ALIASES: frozenset[str] = frozenset({"remember", "skill-creator"})
+_STATIC_SKILL_ALIASES: frozenset[str] = frozenset({"remember"})
 """Built-in skill names that have a dedicated top-level slash command."""
 
 

@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 _MARKETPLACE_RELATIVE_PATHS = (
     Path(".claude-plugin") / "marketplace.json",
+    Path(".dcoder-plugin") / "marketplace.json",
+    Path(".dcoder") / ".dcoder-plugin" / "marketplace.json",
     Path(".dcoder") / "plugins" / "marketplace.json",
     Path(".agents") / "plugins" / "marketplace.json",
     Path("marketplace.json"),
