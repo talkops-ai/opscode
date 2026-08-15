@@ -34,8 +34,8 @@ Use memory when the knowledge is:
 - Something to always keep in mind
 - A simple rule or pattern
 
-**Global** (`~/.dcoder/AGENTS.md` or `~/.gemini/config/AGENTS.md`): Universal preferences across all projects
-**Project** (`.agents/AGENTS.md` or `AGENTS.md`): Project-specific conventions and decisions
+**Global** (`~/.dcoder/AGENTS.md` or `~/.agents/AGENTS.md`): Universal preferences across all projects
+**Project** (`.dcoder/AGENTS.md`, `AGENTS.md`, or `.agents/AGENTS.md`): Project-specific conventions and decisions
 
 ### -> Skill for reusable workflows and methodologies
 **Create a skill when** we developed:
@@ -53,7 +53,8 @@ If we established best practices around a workflow or process, capture them in a
 **Example:** If we discussed best practices for code review, create a `code-review` skill that encodes those practices into a reusable workflow.
 
 ### Skill Location
-`~/.dcoder/skills/<skill-name>/SKILL.md` or `.agents/skills/<skill-name>/SKILL.md`
+- **User skill**: `~/.dcoder/skills/<skill-name>/SKILL.md` or `~/.agents/skills/<skill-name>/SKILL.md`
+- **Project skill**: `.dcoder/skills/<skill-name>/SKILL.md` or `.agents/skills/<skill-name>/SKILL.md`
 
 ### Skill Structure
 ```
@@ -109,7 +110,7 @@ For preferences, guidelines, and simple rules that don't warrant a full skill:
 - Avoid A because it leads to B
 ```
 
-Use `replace_file_content` or `multi_replace_file_content` to update existing files or `write_to_file` to create new ones.
+Use `edit_file` to update existing files or `write_file` to create new ones.
 
 ## Step 5: Summarize Changes
 

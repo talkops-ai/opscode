@@ -7,23 +7,15 @@ def test_parse_built_in_subagents():
     assert len(built_ins) >= 3
     names = [b["name"] for b in built_ins]
     assert "aws-terraform-writer" in names
-    assert "helm-validator" in names
-    assert "k8s-auditor" in names
-
-    k8s = next(b for b in built_ins if b["name"] == "k8s-auditor")
-    assert k8s["source"] == "built-in"
-    mcp_files = k8s.get("mcp_files") or []
-    mcp_config = k8s.get("mcp_config") or {}
-    assert "k8s_mcp" in mcp_config.get("mcpServers", {}) or len(mcp_files) > 0
-    assert k8s.get("skills") == ["k8s-security-policy"]
+    assert "k8s-helm-provisioner" in names
+    assert "infra-ansible-provisioner" in names
 
     aws_tf = next(b for b in built_ins if b["name"] == "aws-terraform-writer")
-    skills = aws_tf.get("skills") or []
-    assert "aws-terraform-module-writer" in skills
-    assert "*" not in skills
+    assert aws_tf["source"] == "built-in"
+    assert len(aws_tf["description"]) > 0
 
-    helm = next(b for b in built_ins if b["name"] == "helm-validator")
-    assert helm.get("skills") == ["helm-lint-rules"]
+    helm = next(b for b in built_ins if b["name"] == "k8s-helm-provisioner")
+    assert helm["source"] == "built-in"
 
 
 def test_parse_subagent_bundle_custom(tmp_path):

@@ -6,6 +6,8 @@ import pytest
 from unittest.mock import Mock, MagicMock
 
 from dcoder.agent.factory import (
+    CLIContextSchema,
+    _interrupt_predicate,
     _should_interrupt_tool_call,
     _format_description,
     _resolve_ptc_option,
@@ -19,9 +21,10 @@ class TestShouldInterruptToolCall:
         request = Mock(runtime=Mock(context={"auto_approve": True}))
         assert not _should_interrupt_tool_call(request)
 
-    def test_respects_auto_approve_in_context_object(self):
-        """Returns False if auto_approve is True on context object."""
-        request = Mock(runtime=Mock(context=Mock(auto_approve=True)))
+    def test_respects_auto_approve_in_context_schema(self):
+        """Returns False if auto_approve is True on CLIContextSchema."""
+        ctx = CLIContextSchema(auto_approve=True)
+        request = Mock(runtime=Mock(context=ctx, store=None))
         assert not _should_interrupt_tool_call(request)
 
     def test_interrupts_by_default(self):
@@ -29,7 +32,8 @@ class TestShouldInterruptToolCall:
         request = Mock(runtime=Mock(context={"auto_approve": False}))
         assert _should_interrupt_tool_call(request)
         
-        request = Mock(runtime=Mock(context=Mock(auto_approve=False)))
+        ctx_schema = CLIContextSchema(auto_approve=False)
+        request = Mock(runtime=Mock(context=ctx_schema, store=None))
         assert _should_interrupt_tool_call(request)
         
         request = Mock(runtime=None)

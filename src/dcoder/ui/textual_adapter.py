@@ -470,12 +470,15 @@ class TextualAdapter:
         raw_mode = getattr(self._app, "_approval_mode", ApprovalMode.MANUAL) if self._app is not None else ApprovalMode.MANUAL
         selected_mode = raw_mode if isinstance(raw_mode, ApprovalMode) else coerce_approval_mode(raw_mode)
 
-        live_key = approval_mode_key(thread_id)
-        if self._app is not None and getattr(self._app, "_agent", None) is not None:
+        agent_obj = (
+            self._client
+            or (getattr(self._app, "_client", None) if self._app is not None else None)
+            or (getattr(self._app, "_agent", None) if self._app is not None else None)
+        )
+        live_key: str | None = None
+        if agent_obj is not None:
             try:
-                res_key = await awrite_approval_mode(self._app._agent, thread_id, mode=selected_mode)
-                if res_key:
-                    live_key = res_key
+                live_key = await awrite_approval_mode(agent_obj, thread_id, mode=selected_mode)
             except Exception:
                 logger.warning("Failed to persist approval mode to store", exc_info=True)
 
@@ -505,8 +508,11 @@ class TextualAdapter:
             context["turn_id"] = turn_id
 
         context["approval_mode"] = selected_mode.value
-        context["auto_approve"] = (selected_mode is not ApprovalMode.MANUAL)
-        context["approval_mode_key"] = live_key
+        context["auto_approve"] = (selected_mode is ApprovalMode.YOLO)
+        if live_key is not None:
+            context["approval_mode_key"] = live_key
+        else:
+            context.pop("approval_mode_key", None)
 
         logger.debug("TUI: stream_turn start, thread_id: %s, context: %s", thread_id, context)
 

@@ -43,13 +43,11 @@ def test_built_in_subagents():
     assert len(built_ins) >= 3
     names = [s["name"] for s in built_ins]
     assert "aws-terraform-writer" in names
-    assert "helm-validator" in names
-    assert "k8s-auditor" in names
+    assert "k8s-helm-provisioner" in names
+    assert "infra-ansible-provisioner" in names
     
     # Ensure prompts contain essential instructions
     aws_tf = next(s for s in built_ins if s["name"] == "aws-terraform-writer")
-    aws_tf_skills = aws_tf.get("skills") or []
-    assert "aws-terraform-module-writer" in aws_tf_skills
     assert len(aws_tf["description"]) > 0
     assert len(aws_tf["system_prompt"]) > 0
 

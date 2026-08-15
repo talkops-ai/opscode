@@ -61,29 +61,29 @@ from langchain.agents.middleware.types import AgentMiddleware
 
 
 def _should_interrupt_tool_call(request: Any, *, auto_mode_enabled: bool = True) -> bool:
-    """Decide whether a gated tool call should pause for human approval."""
-    from dcoder.middleware.auto_mode import _async_routing_mode
-    from dcoder.security.approval_mode import ApprovalMode, coerce_approval_mode, read_approval_mode_from_store, approval_mode_key
+    """Decide whether a gated tool call should pause for human approval.
 
-    # 1. Check async routing mode attached by AsyncApprovalHITLMiddleware / AutoModeHITLMiddleware
+    Uses the unified resolution chain from ``approval_mode_source`` so that
+    both ``CLIContextSchema`` and plain-dict contexts are handled consistently.
+
+    Reference: deepagents_code/agent.py:1916-1951
+    """
+    from dcoder.approval_mode import ApprovalMode
+    from dcoder.middleware.auto_mode import _async_routing_mode
+
+    # 1. Fast path: async routing mode already set by
+    #    AsyncApprovalHITLMiddleware / AutoModeHITLMiddleware
     mode = _async_routing_mode(getattr(request, "state", None))
     runtime = getattr(request, "runtime", None)
 
-    # 2. Fall back to context / store resolution if no async routing decision present
+    # 2. Fall back to unified context / store resolution
     if mode is None and runtime is not None:
-        ctx = getattr(runtime, "context", None)
-        store = getattr(runtime, "store", None)
-        if isinstance(ctx, dict):
-            if ctx.get("auto_approve"):
-                mode = ApprovalMode.YOLO
-            elif ctx.get("approval_mode"):
-                mode = coerce_approval_mode(ctx.get("approval_mode"))
-            elif ctx.get("thread_id"):
-                key = approval_mode_key(str(ctx["thread_id"]))
-                mode = read_approval_mode_from_store(store, key)
-        elif ctx is not None:
-            if getattr(ctx, "auto_approve", False):
-                mode = ApprovalMode.YOLO
+        from dcoder.security.approval_mode_source import _resolve_approval_mode
+
+        mode = _resolve_approval_mode(
+            getattr(runtime, "context", None),
+            getattr(runtime, "store", None),
+        )
 
     if mode is ApprovalMode.YOLO:
         return False
@@ -99,6 +99,25 @@ def _should_interrupt_tool_call(request: Any, *, auto_mode_enabled: bool = True)
             return False
 
     return True
+
+
+def _interrupt_predicate(
+    *, auto_mode_enabled: bool,
+) -> Callable[[Any], bool]:
+    """Bind runtime eligibility into a stock-HITL predicate.
+
+    Returns a predicate suitable for ``InterruptOnConfig.when`` that closes
+    over ``auto_mode_enabled``.
+
+    Reference: deepagents_code/agent.py:2029-2044
+    """
+
+    def should_interrupt(request: Any) -> bool:
+        return _should_interrupt_tool_call(
+            request, auto_mode_enabled=auto_mode_enabled
+        )
+
+    return should_interrupt
 
 
 def _format_task_description(tool_call: Any, state: Any = None, runtime: Any = None) -> str:
@@ -463,13 +482,10 @@ def create_dcoder_agent(
     registry = ToolRegistry.get_instance()
     tools_list = list(tools) if tools is not None else []
     
-    # Append default tools if not already present
+    # Append default tools if not already present (core web exploration)
     default_tool_names = [
-        "web_search", "fetch_url",
-        "terraform_validate", "terraform_plan", "terraform_fmt",
-        "helm_lint", "helm_template",
-        "kubectl_get", "kubectl_describe", "kubectl_logs",
-        "ansible_check", "argocd_diff"
+        "web_search",
+        "fetch_url",
     ]
     for tool_name in default_tool_names:
         if not any(getattr(t, "name", None) == tool_name for t in tools_list):

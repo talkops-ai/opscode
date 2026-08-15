@@ -1,132 +1,37 @@
 ---
 name: docker
-description: "Write optimised Dockerfiles with multi-stage builds, security hardening, and Compose orchestration"
-domain: DevOps
-compatibility: "docker >= 24, docker-compose >= 2.20"
-allowed_tools:
-  - write_file
-  - read_file
-  - execute
-metadata:
-  domain: docker
-  difficulty: intermediate
+description: "Write optimised Dockerfiles with multi-stage builds, security hardening, and Compose orchestration. Use when authoring, reviewing, or optimizing container artifacts for: (1) Multi-stage Dockerfiles for Go, Node.js, Python, or Rust, (2) Container security hardening including non-root USER, minimal base images, and secret mounts, (3) Docker Compose orchestration definitions, healthchecks, and networking, or (4) Docker build performance and layer caching optimization."
+license: MIT
+compatibility: designed for deepagents-code
 ---
 
-# Docker & Container Skill
+# Docker (Multi-Stage Builds, Security Hardening & Compose)
 
-You are an expert container engineer. Follow these guidelines for Dockerfiles, images, and Compose configurations.
+Guidelines for building lightweight, secure, and production-ready Docker containers and multi-service Docker Compose stacks.
 
-## Dockerfile Best Practices
+## Quick Workflow
 
-### Multi-Stage Builds
+1. **Multi-Stage Build Pipeline**: Separate build dependencies from runtime dependencies using multi-stage builds (`AS builder`, `AS runner`).
+2. **Layer Caching Optimization**: Copy lockfiles/manifests first, run dependency downloads with BuildKit cache mounts (`--mount=type=cache`), then copy application source.
+3. **Security Hardening**: Enforce non-root execution (`USER nonroot` or dedicated UID/GID), select minimal base images (Distroless or Alpine), and drop Linux capabilities.
+4. **Secrets Protection**: Use BuildKit secret mounts (`--mount=type=secret`) during build and Docker Compose secrets for runtime. Never hardcode credentials in `ENV` or `ARG`.
+5. **Orchestration with Compose v2**: Define multi-container services with healthchecks (`condition: service_healthy`), internal networks, and resource limits.
 
-```dockerfile
-# Build stage
-FROM python:3.12-slim AS builder
-WORKDIR /app
-COPY pyproject.toml uv.lock ./
-RUN pip install uv && uv sync --frozen --no-dev
-COPY src/ src/
+---
 
-# Runtime stage
-FROM python:3.12-slim AS runtime
-RUN groupadd -r app && useradd -r -g app app
-WORKDIR /app
-COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/src /app/src
-ENV PATH="/app/.venv/bin:$PATH"
-USER app
-EXPOSE 8080
-ENTRYPOINT ["python", "-m", "myapp"]
-```
+## Detailed References
 
-### Layer Caching
+- **Multi-Stage Dockerfile Templates**: See [references/dockerfile-patterns.md](references/dockerfile-patterns.md) for production multi-stage Dockerfiles for Node.js, Python, Go, and Rust.
+- **Security Hardening**: See [references/security-hardening.md](references/security-hardening.md) for non-root setup, distroless images, read-only root filesystems, and capability drops.
+- **Docker Compose Orchestration**: See [references/compose-orchestration.md](references/compose-orchestration.md) for Docker Compose v2 patterns, network segmentation, healthcheck dependencies, and secret mounting.
 
-- Copy dependency files (`requirements.txt`, `package.json`, `go.mod`) BEFORE source code.
-- Use `--mount=type=cache` for package manager caches:
-  ```dockerfile
-  RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
-  ```
-- Combine `RUN` commands to reduce layers: `RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*`.
+---
 
-### Security
+## Production Container Checklist
 
-- Use minimal base images: `*-slim`, `distroless`, or `scratch`.
-- Run as non-root: `USER app` (create user with `groupadd`/`useradd`).
-- Don't store secrets in images — use build args with `--secret` mount.
-- Pin base image digests for reproducibility: `FROM python:3.12-slim@sha256:...`.
-- Use `.dockerignore` to exclude `.git`, `.venv`, `node_modules`, `*.pyc`.
-
-### .dockerignore
-
-```
-.git
-.venv
-node_modules
-__pycache__
-*.pyc
-.env
-.env.*
-*.md
-tests/
-```
-
-## Docker Compose
-
-```yaml
-services:
-  app:
-    build:
-      context: .
-      target: runtime
-    ports:
-      - "8080:8080"
-    environment:
-      - DATABASE_URL=postgresql://db:5432/mydb
-    depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: mydb
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    secrets:
-      - db_password
-
-volumes:
-  pgdata:
-
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-```
-
-## Validation
-
-1. `docker build --target runtime -t myapp:test .` — build and tag.
-2. `docker scan myapp:test` or `trivy image myapp:test` — vulnerability scan.
-3. `docker compose config` — validate Compose file.
-4. `hadolint Dockerfile` — Dockerfile linting.
-
-## Best Practices Summary
-
-- One process per container.
-- Use `ENTRYPOINT` for the main process, `CMD` for default arguments.
-- Set `HEALTHCHECK` in Dockerfile or Compose.
-- Use named volumes for persistent data — never bind-mount in production.
-- Use `depends_on` with `condition: service_healthy` for startup ordering.
-- Tag images with Git SHA or SemVer — never use `:latest` in production.
+- [ ] **Multi-Stage Separation**: Build toolchains (compilers, dev dependencies) excluded from final runtime image.
+- [ ] **Non-Root User**: Container runs as explicit non-root user (`USER appuser` or `USER nonroot`).
+- [ ] **Minimal Base Image**: Base image uses Alpine, Distroless, or minimal slim distributions.
+- [ ] **Build Caching**: Dependencies installed before copying application source; BuildKit cache mounts applied.
+- [ ] **Secret Hygiene**: No credentials stored in `ENV`, `ARG`, or image layers.
+- [ ] **Compose Healthchecks**: Services use `depends_on` with `condition: service_healthy` for startup dependencies.

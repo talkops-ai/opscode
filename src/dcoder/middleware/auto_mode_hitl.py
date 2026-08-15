@@ -79,7 +79,13 @@ class AsyncApprovalHITLMiddleware(HumanInTheLoopMiddleware[Any, Any, Any]):
         state: AgentState[Any],
         runtime: Runtime[Any],
     ) -> dict[str, Any] | None:
-        mode, _mode_unavailable = await _live_mode(runtime)
+        """Revalidate live mode, then immediately run stock approval routing.
+
+        Reference: deepagents_code/agent.py:1981-2001
+        """
+        from dcoder.security.approval_mode_source import _aresolve_approval_mode
+
+        mode = await _aresolve_approval_mode(runtime.context, runtime.store)
         routed_state = dict(state)
         routed_state[_ASYNC_APPROVAL_ROUTING_KEY] = _RoutingDecision(mode)
         return super().after_model(cast("AgentState[Any]", routed_state), runtime)
@@ -644,31 +650,36 @@ def _thread_key(runtime: object) -> str | None:
 
 
 async def _live_mode(runtime: object) -> tuple[ApprovalMode, bool]:
-    store = getattr(runtime, "store", None)
+    """Read the live approval mode using the unified async resolution chain.
+
+    Returns a ``(mode, unavailable)`` tuple where *unavailable* is ``True``
+    when the mode could not be resolved from either the Store or context
+    and the function fell back to ``MANUAL``.
+
+    Reference: deepagents_code/agent.py:1870-1889 via _aresolve_approval_mode
+    """
+    from dcoder.security.approval_mode_source import _aresolve_approval_mode
+
     context = getattr(runtime, "context", None)
-    key = _thread_key(runtime)
+    store = getattr(runtime, "store", None)
 
-    if key is not None and store is not None:
-        mode = await aread_approval_mode_from_store(store, key)
-        if mode is not None:
-            return mode, False
+    try:
+        mode = await _aresolve_approval_mode(context, store)
+        # ``_aresolve_approval_mode`` returns MANUAL when the store item is
+        # missing, but that is a true unavailable scenario only when the
+        # source was a _LiveLookup. To detect this accurately, re-check
+        # the source. However, for simplicity and backward compatibility,
+        # mark as unavailable only when no context is present at all.
+        unavailable = (context is None)
+    except Exception:
+        logger.warning(
+            "Failed to resolve approval mode; falling to Manual",
+            exc_info=True,
+        )
+        mode = ApprovalMode.MANUAL
+        unavailable = True
 
-    if isinstance(context, Mapping):
-        raw_mode = context.get("approval_mode")
-        auto_app = context.get("auto_approve")
-        if raw_mode:
-            return coerce_approval_mode(raw_mode), False
-        if auto_app:
-            return ApprovalMode.YOLO, False
-    elif context is not None:
-        raw_mode = getattr(context, "approval_mode", None)
-        auto_app = getattr(context, "auto_approve", False)
-        if raw_mode:
-            return coerce_approval_mode(raw_mode), False
-        if auto_app:
-            return ApprovalMode.YOLO, False
-
-    return ApprovalMode.MANUAL, True
+    return mode, unavailable
 
 
 def _trusted_prompt_rows(
@@ -1369,14 +1380,24 @@ _ROUTINE_WRITE_SUFFIXES = frozenset(
     {
         ".c",
         ".cc",
+        ".cfg",
+        ".conf",
+        ".containerfile",
         ".cpp",
         ".css",
+        ".csv",
+        ".dockerfile",
         ".go",
         ".h",
+        ".hcl",
         ".hpp",
         ".html",
+        ".ini",
         ".ipynb",
+        ".j2",
         ".java",
+        ".jinja",
+        ".jinja2",
         ".js",
         ".jsx",
         ".json",
@@ -1384,6 +1405,7 @@ _ROUTINE_WRITE_SUFFIXES = frozenset(
         ".md",
         ".mdx",
         ".php",
+        ".properties",
         ".proto",
         ".py",
         ".rb",
@@ -1392,9 +1414,15 @@ _ROUTINE_WRITE_SUFFIXES = frozenset(
         ".scss",
         ".sql",
         ".swift",
+        ".template",
         ".tex",
+        ".tf",
+        ".tfvars",
+        ".tmpl",
         ".toml",
+        ".tpl",
         ".ts",
+        ".tsv",
         ".tsx",
         ".txt",
         ".vue",
@@ -1422,7 +1450,14 @@ _DEPENDENCY_FILES = frozenset(
 
 
 def _routine_write_allowed(root: Path, call: ToolCall) -> bool:
-    raw_path = call.get("args", {}).get("file_path")
+    args = call.get("args") or {}
+    raw_path = (
+        args.get("file_path")
+        or args.get("path")
+        or args.get("TargetFile")
+        or args.get("target_file")
+        or args.get("file")
+    )
     path = _resolve_path(root, raw_path)
     if path is None or _is_sensitive_write_path(root, path):
         return False
@@ -1555,8 +1590,13 @@ def _deterministic_allow(
         return mcp_tool_is_coherently_read_only(tool)
     if name in {"write_file", "edit_file"}:
         return _routine_write_allowed(root, call)
+    if name in {"web_search", "fetch_url"}:
+        return True
+    if name in {"task", "start_async_task", "update_async_task", "cancel_async_task"}:
+        return True
     if name == "execute":
-        command = call.get("args", {}).get("command")
+        args = call.get("args") or {}
+        command = args.get("command") or args.get("cmd")
         return _fixed_repo_command_allowed(
             command, root
         ) or _narrow_configured_command_allowed(command, shell_allow_list)

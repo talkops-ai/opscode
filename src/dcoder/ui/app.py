@@ -3139,7 +3139,7 @@ class DCoderApp(App):
 
     async def _write_live_approval_mode(self, mode: ApprovalMode | None = None) -> bool:
         """Persist approval mode to the remote Store for the active session thread."""
-        agent_obj = getattr(self, "_agent", None)
+        agent_obj = getattr(self, "_client", None) or getattr(self, "_agent", None)
         thread_id = getattr(self, "_agent_thread_id", None)
         if agent_obj is None or thread_id is None:
             return False
@@ -3160,8 +3160,9 @@ class DCoderApp(App):
     async def _set_approval_mode(self, target: ApprovalMode) -> bool:
         from dcoder.approval_mode import ApprovalMode
 
+        agent_obj = getattr(self, "_client", None) or getattr(self, "_agent", None)
         should_persist = (
-            getattr(self, "_agent", None) is not None
+            agent_obj is not None
             and getattr(self, "_agent_thread_id", None) is not None
         )
         if should_persist and not await self._write_live_approval_mode(target):

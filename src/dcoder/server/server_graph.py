@@ -77,16 +77,6 @@ async def _make_graph() -> Any:
         default_tool_names = [
             "web_search",
             "fetch_url",
-            "terraform_validate",
-            "terraform_plan",
-            "terraform_fmt",
-            "helm_lint",
-            "helm_template",
-            "kubectl_get",
-            "kubectl_describe",
-            "kubectl_logs",
-            "ansible_check",
-            "argocd_diff",
         ]
         for tool_name in default_tool_names:
             try:

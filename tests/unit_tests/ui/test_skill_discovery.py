@@ -12,18 +12,10 @@ import yaml
 BUILT_IN_SKILLS_DIR = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "built_in_skills"
 
 EXPECTED_SKILLS = [
-    "ansible",
-    "argocd",
-    "ci-cd",
-    "cloud-aws",
-    "cloud-azure",
-    "cloud-gcp",
+    "cloud-core",
     "docker",
-    "helm",
     "kubernetes",
     "remember",
-    "terraform",
-    "terragrunt",
 ]
 
 
