@@ -33,7 +33,7 @@ class ScrollbarHandler(BaseCommandHandler):
         label = "toggled"
         if ctx.app is not None:
             try:
-                from dcoder.ui.messages import MessageList
+                from dcoder.ui.widgets.messages import MessageList
                 messages = ctx.app.query_one("#messages", MessageList)
                 current = getattr(messages.styles, "scrollbar_size_vertical", 1)
                 new_size = 0 if current == 1 else 1
@@ -110,7 +110,7 @@ class NotificationsHandler(BaseCommandHandler):
         if ctx.app is not None:
             try:
                 from dcoder.model.config import is_warning_suppressed
-                from dcoder.ui.notification_settings import (
+                from dcoder.ui.widgets.notification_settings import (
                     WARNING_TOGGLES,
                     NotificationSettingsScreen,
                 )

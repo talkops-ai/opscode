@@ -111,7 +111,7 @@ async def test_goal_review_menu_cancel():
 @pytest.mark.asyncio
 async def test_inline_prompt_text_area_newline_shortcuts():
     """Test multi-line newline insertion via shift+enter, ctrl+j, and backslash-enter."""
-    from dcoder.ui._inline_prompt import InlinePromptTextArea
+    from dcoder.ui.widgets._inline_prompt import InlinePromptTextArea
     from textual.events import Key
 
     text_area = InlinePromptTextArea()

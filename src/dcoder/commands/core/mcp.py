@@ -56,7 +56,7 @@ class McpHandler(BaseCommandHandler):
         if ctx.app is None:
             return CommandResult(success=False, message="App context not available.")
         try:
-            from dcoder.ui.mcp_viewer import MCPViewerScreen
+            from dcoder.ui.widgets.mcp_viewer import MCPViewerScreen
             servers = ctx.app.get_mcp_servers() if hasattr(ctx.app, "get_mcp_servers") else []
             ctx.app.push_screen(MCPViewerScreen(server_info=servers))
             return CommandResult(success=True, message="", mount_as_app_message=False)

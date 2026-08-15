@@ -28,7 +28,7 @@ async def require_confirmation(handler: BaseCommandHandler, ctx: CommandContext)
     # If app supports screen pushing (Textual app in TUI mode)
     if ctx.app is not None and hasattr(ctx.app, "push_screen_wait"):
         try:
-            from dcoder.ui.approval import ApprovalModalScreen
+            from dcoder.ui.widgets.approval import ApprovalModalScreen
 
             screen = ApprovalModalScreen(
                 tool_name=handler.name,

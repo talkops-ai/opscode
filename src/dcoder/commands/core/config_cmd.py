@@ -64,7 +64,7 @@ class ConfigHandler(BaseCommandHandler):
 
     def _show_config(self, ctx: CommandContext) -> CommandResult:
         if ctx.app is not None:
-            from dcoder.ui.config_manager import ConfigManagerScreen
+            from dcoder.ui.widgets.config_manager import ConfigManagerScreen
             settings = self._get_settings(ctx)
             screen = ConfigManagerScreen(settings=settings)
             ctx.app.push_screen(screen)

@@ -71,7 +71,7 @@ async def test_resume_nonexistent_thread():
 async def test_app_show_thread_selector():
     """Verify DCoderApp._show_thread_selector instantiates and pushes ThreadSelectorScreen."""
     from dcoder.ui.app import DCoderApp
-    from dcoder.ui.thread_selector import ThreadSelectorScreen
+    from dcoder.ui.widgets.thread_selector import ThreadSelectorScreen
 
     app = DCoderApp()
     app.push_screen = MagicMock()
@@ -86,7 +86,7 @@ async def test_app_show_thread_selector():
 @pytest.mark.asyncio
 async def test_thread_selector_screen_delete():
     """Verify ThreadSelectorScreen action_delete_thread triggers deletion worker."""
-    from dcoder.ui.thread_selector import ThreadSelectorScreen
+    from dcoder.ui.widgets.thread_selector import ThreadSelectorScreen
 
     threads = [{"thread_id": "test-thread-1", "message_count": 5, "initial_prompt": "hello"}]
     screen = ThreadSelectorScreen(threads=threads)

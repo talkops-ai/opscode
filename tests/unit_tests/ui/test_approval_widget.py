@@ -5,9 +5,9 @@ import pytest
 from unittest.mock import Mock, MagicMock
 from textual.app import App, ComposeResult
 from dcoder.file_ops import is_sensitive_file_path, format_display_path
-from dcoder.ui.tool_renderers import get_renderer
+from dcoder.ui.widgets.tool_renderers import get_renderer
 from dcoder.ui.widgets.approval import ApprovalMenu, _is_command_too_long, _truncate_command
-from dcoder.ui.subagent_panel import SubagentPanel
+from dcoder.ui.widgets.subagent_panel import SubagentPanel
 
 
 def test_sensitive_file_detection():
@@ -291,8 +291,8 @@ async def test_subagent_panel_timer_pause_resume():
 @pytest.mark.asyncio
 async def test_task_approval_widget_rendering():
     """Verify TaskApprovalWidget renders subagent_type, warning, and task instructions."""
-    from dcoder.ui.tool_renderers import TaskRenderer
-    from dcoder.ui.tool_widgets import TaskApprovalWidget
+    from dcoder.ui.widgets.tool_renderers import TaskRenderer
+    from dcoder.ui.widgets.tool_widgets import TaskApprovalWidget
 
     tool_args = {
         "subagent_type": "terraform-reviewer",

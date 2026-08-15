@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from dcoder.ui.auto_mode_notice import AutoModeNoticeScreen
+from dcoder.ui.widgets.auto_mode_notice import AutoModeNoticeScreen
 
 
 def test_auto_mode_notice_screen_initialization():

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from textual.app import App, ComposeResult
 
-from dcoder.ui.messages import (
+from dcoder.ui.widgets.messages import (
     _COLLAPSE_OUTPUT_BY_DEFAULT,
     MessageList,
     ToolCallMessage,
@@ -16,7 +16,7 @@ from dcoder.ui.messages import (
     summarize_tool_group,
 )
 from dcoder.ui.theme import get_css_variable_defaults, get_theme_colors, register_app_themes
-from dcoder.ui.tool_display import format_tool_result_summary
+from dcoder.ui.widgets.tool_display import format_tool_result_summary
 
 
 def test_collapse_output_by_default_contains_new_tools():

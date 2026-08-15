@@ -122,7 +122,7 @@ from dcoder.approval_mode import (
     coerce_approval_mode,
 )
 from dcoder.middleware.goal_state_notice import project_goal_state
-from dcoder.ui._ask_user_types import (
+from dcoder.ui.widgets._ask_user_types import (
     ASK_USER_AUTHORIZATION_METADATA_KEY,
     MAX_ASK_USER_AUTHORIZATION_ANSWER_CHARS,
 )

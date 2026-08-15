@@ -1,44 +1,12 @@
-"""DCoder TUI widgets package.
+"""DCoder TUI package.
 
-Exports the public widget classes that ``DCoderApp`` and the
-``TextualAdapter`` compose the interface from.
+Exports core application and adapter classes, as well as re-exports of primary
+UI widgets from ``dcoder.ui.widgets``.
 """
 
 from dcoder.ui.app import DCoderApp
-from dcoder.ui.approval import (
-    ApprovalDecided,
-    ApprovalMenu,
-    ApprovalModalScreen,
-    assess_tool_risk,
-)
-from dcoder.ui.ask_user import AskUserMenu
-from dcoder.ui.chat_input import ChatInput
-from dcoder.ui.devops_renderers import TerraformPlanWidget
-from dcoder.ui.diff import compose_diff_lines
-from dcoder.ui.infra_panel import InfraStatePanel
-from dcoder.ui.messages import (
-    AssistantMessage,
-    DiffMessage,
-    ErrorMessage,
-    MessageList,
-    QueuedUserMessage,
-    SkillMessage,
-    SystemMessage,
-    ToolCallMessage,
-    ToolGroupSummary,
-    UserMessage,
-)
-from dcoder.ui.notification_center import NotificationCenter
-from dcoder.ui.operation_card import OperationCard
-from dcoder.ui.plugin_manager import PluginManagerScreen
-from dcoder.ui.preferences import ThemeSelector
-from dcoder.ui.skills_viewer import SkillsViewerScreen
-
-
-from dcoder.ui.status import StatusBar
-from dcoder.ui.subagent_panel import SubagentColumn, SubagentPanel
 from dcoder.ui.textual_adapter import TextualAdapter
-from dcoder.ui.toast import ToastNotification, show_toast
+from dcoder.ui.preferences import ThemeSelector
 from dcoder.ui.ui_help import (
     show_agents_help,
     show_auth_help,
@@ -62,8 +30,38 @@ from dcoder.ui.ui_help import (
     show_tools_install_help,
     show_tools_list_help,
 )
-from dcoder.ui.welcome import WelcomeBanner
-from dcoder.ui.welcome_popup import WelcomeDetailPopup
+from dcoder.ui.widgets.approval import (
+    ApprovalDecided,
+    ApprovalMenu,
+    ApprovalModalScreen,
+    assess_tool_risk,
+)
+from dcoder.ui.widgets.ask_user import AskUserMenu
+from dcoder.ui.widgets.chat_input import ChatInput
+from dcoder.ui.widgets.devops_renderers import TerraformPlanWidget
+from dcoder.ui.widgets.diff import compose_diff_lines
+from dcoder.ui.widgets.infra_panel import InfraStatePanel
+from dcoder.ui.widgets.messages import (
+    AssistantMessage,
+    DiffMessage,
+    ErrorMessage,
+    MessageList,
+    QueuedUserMessage,
+    SkillMessage,
+    SystemMessage,
+    ToolCallMessage,
+    ToolGroupSummary,
+    UserMessage,
+)
+from dcoder.ui.widgets.notification_center import NotificationCenter
+from dcoder.ui.widgets.operation_card import OperationCard
+from dcoder.ui.widgets.plugin_manager import PluginManagerScreen
+from dcoder.ui.widgets.skills_viewer import SkillsViewerScreen
+from dcoder.ui.widgets.status import StatusBar
+from dcoder.ui.widgets.subagent_panel import SubagentColumn, SubagentPanel
+from dcoder.ui.widgets.toast import ToastNotification, show_toast
+from dcoder.ui.widgets.welcome import WelcomeBanner
+from dcoder.ui.widgets.welcome_popup import WelcomeDetailPopup
 
 __all__ = [
     "ApprovalDecided",
@@ -119,5 +117,3 @@ __all__ = [
     "show_tools_install_help",
     "show_tools_list_help",
 ]
-
-

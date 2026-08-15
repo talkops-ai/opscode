@@ -40,7 +40,7 @@ class ClearHandler(BaseCommandHandler):
                 ctx.app._sync_status_queued()
 
             try:
-                from dcoder.ui.messages import MessageList
+                from dcoder.ui.widgets.messages import MessageList
                 messages = ctx.app.query_one("#messages", MessageList)
                 messages.clear()
             except Exception:
@@ -57,7 +57,7 @@ class ClearHandler(BaseCommandHandler):
                 ctx.app._restore_goal_rubric_state({})
 
             try:
-                from dcoder.ui.status import StatusBar
+                from dcoder.ui.widgets.status import StatusBar
                 status_bar = ctx.app.query_one("#status-bar", StatusBar)
                 status_bar.set_status("Ready")
             except Exception:

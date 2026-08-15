@@ -50,23 +50,23 @@ from textual.theme import Theme
 from textual.worker import Worker
 
 from dcoder.approval_mode import ApprovalMode
-from dcoder.ui.approval import (
+from dcoder.ui.widgets.approval import (
     ApprovalDecided,
     ApprovalMenu,
     ApprovalModalScreen,
     assess_tool_risk,
 )
 from dcoder.ui.widgets.goal_review import GoalReviewMenu
-from dcoder.ui.autocomplete import AutocompletePopup
-from dcoder.ui.chat_input import ChatInput, InputMode
+from dcoder.ui.widgets.autocomplete import AutocompletePopup
+from dcoder.ui.widgets.chat_input import ChatInput, InputMode
 from dcoder.ui.command_registry import (
     ALWAYS_IMMEDIATE,
     IMMEDIATE_UI_CMDS,
     BypassTier,
     get_command,
 )
-from dcoder.ui.infra_panel import InfraStatePanel
-from dcoder.ui.messages import (
+from dcoder.ui.widgets.infra_panel import InfraStatePanel
+from dcoder.ui.widgets.messages import (
     AssistantMessage,
     ErrorMessage,
     MessageList,
@@ -74,9 +74,9 @@ from dcoder.ui.messages import (
     SystemMessage,
     UserMessage,
 )
-from dcoder.ui.notification_center import NotificationCenter
-from dcoder.ui.status import StatusBar
-from dcoder.ui.subagent_panel import SubagentPanel
+from dcoder.ui.widgets.notification_center import NotificationCenter
+from dcoder.ui.widgets.status import StatusBar
+from dcoder.ui.widgets.subagent_panel import SubagentPanel
 from dcoder.ui.textual_adapter import TextualAdapter
 from dcoder.ui.theme import (
     DARK_COLORS,
@@ -87,9 +87,9 @@ from dcoder.ui.theme import (
     register_app_themes,
     save_theme_preference,
 )
-from dcoder.ui.theme_selector import ThemeSelectorScreen
-from dcoder.ui.toast import show_toast
-from dcoder.ui.welcome import WelcomeBanner
+from dcoder.ui.widgets.theme_selector import ThemeSelectorScreen
+from dcoder.ui.widgets.toast import show_toast
+from dcoder.ui.widgets.welcome import WelcomeBanner
 
 from dcoder.ui.permission_store import PermissionStore, load_permission_store
 from dcoder.utils.git import (
@@ -366,8 +366,8 @@ class DCoderApp(App):
     # ── Layout ───────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
-        from dcoder.ui.goal_status import GoalStatusPanel
-        from dcoder.ui.subagent_panel import SubagentPanel
+        from dcoder.ui.widgets.goal_status import GoalStatusPanel
+        from dcoder.ui.widgets.subagent_panel import SubagentPanel
         yield MessageList(id="messages")
         with Container(id="bottom-container"):
             yield SubagentPanel(id="subagent-panel")
@@ -446,7 +446,7 @@ class DCoderApp(App):
 
     async def _set_spinner(self, status: str | None) -> None:
         """Show, update, or hide the loading spinner in the message list matching reference dcode."""
-        from dcoder.ui.loading import LoadingWidget
+        from dcoder.ui.widgets.loading import LoadingWidget
 
         if status is None:
             if self._loading_widget is not None:
@@ -465,11 +465,13 @@ class DCoderApp(App):
         if self._loading_widget is None or not getattr(self._loading_widget, "is_attached", False):
             self._loading_widget = LoadingWidget(status)
             await messages.mount(self._loading_widget)
+            messages.scroll_end(animate=False)
         else:
             if hasattr(self._loading_widget, "resume"):
                 self._loading_widget.resume()
             if hasattr(self._loading_widget, "set_status"):
                 self._loading_widget.set_status(status)
+            messages.scroll_end(animate=False)
 
     def _pause_loading_spinner_for_approval(self) -> None:
         """Pause the global spinner timer and subagent panel timer while approval is visible."""
@@ -503,7 +505,14 @@ class DCoderApp(App):
         """
         try:
             messages = self.query_one("#messages", MessageList)
-            await messages.mount(widget)
+            if (
+                self._loading_widget is not None
+                and getattr(self._loading_widget, "is_attached", False)
+                and self._loading_widget.parent is messages
+            ):
+                await messages.mount(widget, before=self._loading_widget)
+            else:
+                await messages.mount(widget)
             messages.scroll_end(animate=False)
         except Exception:
             logger.debug("Could not mount message (app closing?)", exc_info=True)
@@ -895,6 +904,7 @@ class DCoderApp(App):
         if self._adapter and self._adapter.connected and self._agent_thread_id:
             await self._flush_pending_shell_messages()
             self._agent_running = True
+            await self._set_spinner("Thinking")
 
             if self._chat_input:
                 # Visual hint that input is busy
@@ -2032,7 +2042,7 @@ class DCoderApp(App):
     def get_latest_assistant_message(self) -> str | None:
         """Retrieve latest assistant message content for clipboard copy."""
         try:
-            from dcoder.ui.messages import AssistantMessage
+            from dcoder.ui.widgets.messages import AssistantMessage
             msgs = list(self.query(AssistantMessage))
             for latest in reversed(msgs):
                 msg_text = getattr(latest, "content_text", None) or "".join(getattr(latest, "_fragments", []))
@@ -2118,7 +2128,7 @@ class DCoderApp(App):
         goal_state.pending_kind = self._pending_goal_kind
 
         try:
-            from dcoder.ui.goal_status import GoalStatusPanel
+            from dcoder.ui.widgets.goal_status import GoalStatusPanel
             panel = self.query_one(GoalStatusPanel)
             panel.set_goal(
                 self._active_goal or self._pending_goal_objective,
@@ -2163,7 +2173,7 @@ class DCoderApp(App):
         import re
         from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
         from dcoder.middleware.goal_state_notice import is_internal_message
-        from dcoder.ui.messages import (
+        from dcoder.ui.widgets.messages import (
             AssistantMessage,
             MessageList,
             ToolCallMessage,
@@ -2405,7 +2415,7 @@ class DCoderApp(App):
         Reference: deepagents_code/app.py L17136-L17147.
         """
         try:
-            from dcoder.ui.messages import MessageList
+            from dcoder.ui.widgets.messages import MessageList
             messages = self.query_one("#messages", MessageList)
             messages.close_active_tool_group()
         except Exception:
@@ -2417,7 +2427,7 @@ class DCoderApp(App):
         Reference: deepagents_code/app.py L17149-L17270.
         """
         try:
-            from dcoder.ui.messages import MessageList
+            from dcoder.ui.widgets.messages import MessageList
             messages = self.query_one("#messages", MessageList)
             await messages.regroup_completed_tools()
         except Exception:
@@ -2433,7 +2443,7 @@ class DCoderApp(App):
         self._pending_messages.clear()
         self._queued_widgets.clear()
         try:
-            from dcoder.ui.messages import MessageList
+            from dcoder.ui.widgets.messages import MessageList
             messages = self.query_one("#messages", MessageList)
             messages.clear()
         except NoMatches:
@@ -2473,7 +2483,7 @@ class DCoderApp(App):
         else:
             self._message_timestamps_visible = not getattr(self, "_message_timestamps_visible", False)
         try:
-            from dcoder.ui.messages import MessageList
+            from dcoder.ui.widgets.messages import MessageList
             messages = self.query_one("#messages", MessageList)
             messages.set_timestamps_visible(self._message_timestamps_visible)
         except Exception:
@@ -2500,7 +2510,7 @@ class DCoderApp(App):
     async def _has_conversation_messages(self) -> bool:
         """Check if the active session has conversation messages (matches reference dcode)."""
         try:
-            from dcoder.ui.messages import UserMessage, AssistantMessage, MessageList
+            from dcoder.ui.widgets.messages import UserMessage, AssistantMessage, MessageList
             container = self.query_one("#messages", MessageList)
             for child in container.children:
                 if isinstance(child, (UserMessage, AssistantMessage)):
@@ -2526,7 +2536,7 @@ class DCoderApp(App):
         msgs = []
         try:
             from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-            from dcoder.ui.messages import UserMessage, AssistantMessage, ToolCallMessage, MessageList
+            from dcoder.ui.widgets.messages import UserMessage, AssistantMessage, ToolCallMessage, MessageList
             container = self.query_one("#messages", MessageList)
             for child in container.children:
                 if isinstance(child, UserMessage):
@@ -2800,7 +2810,7 @@ class DCoderApp(App):
             if all_auto_approved and approved_commands:
                 result_future.set_result({"type": "approve"})
                 try:
-                    from dcoder.ui.messages import SystemMessage
+                    from dcoder.ui.widgets.messages import SystemMessage
                     messages = self.query_one("#messages", MessageList)
                     for command in approved_commands:
                         auto_msg = SystemMessage(f"✓ Auto-approved shell command (allow-list): {command}")
@@ -3196,7 +3206,7 @@ class DCoderApp(App):
 
     def _notify_auto_mode_enabled_once(self) -> None:
         from dcoder.approval_mode import ApprovalMode, has_auto_mode_notice, save_auto_mode_notice
-        from dcoder.ui.auto_mode_notice import AutoModeNoticeScreen
+        from dcoder.ui.widgets.auto_mode_notice import AutoModeNoticeScreen
 
         if has_auto_mode_notice() or getattr(self, "_auto_mode_notice_pending", False):
             return
@@ -3217,7 +3227,7 @@ class DCoderApp(App):
         
     def action_toggle_debug_console(self) -> None:
         """Toggle the Debug Console overlay via keybind or the `/debug` command."""
-        from dcoder.ui.debug_console import DebugConsoleScreen
+        from dcoder.ui.widgets.debug_console import DebugConsoleScreen
 
         if isinstance(self.screen, DebugConsoleScreen):
             self.pop_screen()
@@ -3283,7 +3293,7 @@ class DCoderApp(App):
 
     def _open_notification_center(self) -> None:
         """Toggle the NotificationCenter panel overlay."""
-        from dcoder.ui.notification_center import NotificationCenter
+        from dcoder.ui.widgets.notification_center import NotificationCenter
 
         try:
             nc = self.query(NotificationCenter)
@@ -3339,7 +3349,7 @@ class DCoderApp(App):
 
     def _open_debug_console(self) -> None:
         """Push the read-only Debug Console modal."""
-        from dcoder.ui.debug_console import DebugConsoleScreen
+        from dcoder.ui.widgets.debug_console import DebugConsoleScreen
 
         def handle_result(_: None) -> None:
             if self._chat_input:
@@ -3368,7 +3378,7 @@ class DCoderApp(App):
         from dcoder._debug import installed_debug_log_path
         from dcoder.config.env_vars import DEBUG, is_env_truthy
         from dcoder._version import __version__
-        from dcoder.ui.debug_console import SnapshotField
+        from dcoder.ui.widgets.debug_console import SnapshotField
         import logging
         from pathlib import Path
 
@@ -3451,7 +3461,7 @@ class DCoderApp(App):
 
     async def _show_thread_selector(self) -> None:
         """Open the interactive thread selector modal screen."""
-        from dcoder.ui.thread_selector import ThreadSelectorScreen
+        from dcoder.ui.widgets.thread_selector import ThreadSelectorScreen
 
         from pathlib import Path
         from dcoder.state.session import SessionManager
@@ -3525,7 +3535,7 @@ class DCoderApp(App):
 
     async def _show_model_selector(self) -> None:
         """Open the interactive model picker modal."""
-        from dcoder.ui.model_selector import ModelSelectorScreen
+        from dcoder.ui.widgets.model_selector import ModelSelectorScreen
         from dcoder.model.config import resolve_model_spec
 
         current_provider, current_model = None, None
@@ -3653,7 +3663,7 @@ class DCoderApp(App):
             get_credential_env_var,
             get_provider_auth_status,
         )
-        from dcoder.ui.auth import AuthPromptScreen, AuthResult
+        from dcoder.ui.widgets.auth import AuthPromptScreen, AuthResult
 
         provider = spec.split(":", 1)[0] if ":" in spec else "openai"
         status = get_provider_auth_status(provider)
@@ -3760,7 +3770,7 @@ class DCoderApp(App):
             default_effort_for_model,
             supported_efforts_for_model,
         )
-        from dcoder.ui.effort_selector import EffortSelectorScreen
+        from dcoder.ui.widgets.effort_selector import EffortSelectorScreen
 
         model_spec = self._model or "default"
         efforts = supported_efforts_for_model(model_spec) or ("low", "medium", "high")
@@ -3783,8 +3793,8 @@ class DCoderApp(App):
     async def _set_effort_override(self, effort: str) -> None:
         """Apply reasoning effort override and update UI."""
         import os
-        from dcoder.ui.messages import SystemMessage
-        from dcoder.ui.status import StatusBar
+        from dcoder.ui.widgets.messages import SystemMessage
+        from dcoder.ui.widgets.status import StatusBar
 
         model_spec = self._model or "default"
 
@@ -3837,7 +3847,7 @@ class DCoderApp(App):
             if self._chat_input:
                 self._chat_input.focus()
 
-        from dcoder.ui.agent_selector import AgentSelectorScreen
+        from dcoder.ui.widgets.agent_selector import AgentSelectorScreen
 
         screen = AgentSelectorScreen(
             current_agent=self._assistant_id,
@@ -3907,7 +3917,7 @@ class DCoderApp(App):
 
     async def _show_plugin_manager(self) -> None:
         """Push the plugin manager modal screen for /plugins."""
-        from dcoder.ui.plugin_manager import PluginManagerScreen
+        from dcoder.ui.widgets.plugin_manager import PluginManagerScreen
 
         mcp_info = self.get_mcp_servers() if hasattr(self, "get_mcp_servers") else ()
         project_root = getattr(self._settings, "project_root", None) if self._settings else None
@@ -3921,7 +3931,7 @@ class DCoderApp(App):
 
     def _open_skills_viewer(self) -> None:
         """Push the interactive skills viewer modal screen."""
-        from dcoder.ui.skills_viewer import SkillsViewerScreen
+        from dcoder.ui.widgets.skills_viewer import SkillsViewerScreen
 
         skills = self.get_discovered_skills()
         self.push_screen(SkillsViewerScreen(skills=skills))
@@ -4107,7 +4117,7 @@ class DCoderApp(App):
         """
         from dcoder.skills.invocation import build_skill_invocation_envelope
         from dcoder.skills.loader import load_skill_content
-        from dcoder.ui.messages import AppMessage, ErrorMessage, SkillMessage, UserMessage
+        from dcoder.ui.widgets.messages import AppMessage, ErrorMessage, SkillMessage, UserMessage
 
         normalized_name = skill_name.strip().lower()
 

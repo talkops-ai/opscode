@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Callable
 from textual.containers import Container, VerticalScroll
 from textual.widget import Widget
 
-from dcoder.ui._ask_user_types import Question
-from dcoder.ui.ask_user import AskUserMenu
+from dcoder.ui.widgets._ask_user_types import Question
+from dcoder.ui.widgets.ask_user import AskUserMenu
 
 if TYPE_CHECKING:
     from dcoder.ui.app import DCoderApp

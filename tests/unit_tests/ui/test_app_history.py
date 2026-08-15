@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from dcoder.ui.app import DCoderApp
-from dcoder.ui.messages import SystemMessage
+from dcoder.ui.widgets.messages import SystemMessage
 
 @pytest.mark.asyncio
 async def test_finalize_connection_with_resume_thread():

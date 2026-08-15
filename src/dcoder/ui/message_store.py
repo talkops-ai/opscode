@@ -13,7 +13,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from dcoder.ui.messages import MessageList
+    from dcoder.ui.widgets.messages import MessageList
 
 
 class MessageType(Enum):

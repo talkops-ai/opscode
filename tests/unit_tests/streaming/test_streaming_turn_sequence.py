@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from dcoder.ui._tool_stream import ToolCallBuffer, tool_call_buffer_key
+from dcoder.ui.widgets._tool_stream import ToolCallBuffer, tool_call_buffer_key
 
 def test_tool_call_buffer_streaming_sequence():
     """Verify state transitions and chunk accumulation during streaming."""

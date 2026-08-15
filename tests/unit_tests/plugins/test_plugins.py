@@ -453,7 +453,7 @@ class TestTUIInstallOptions:
     """Tests for _install_details_options."""
 
     def test_options_without_project(self):
-        from dcoder.ui.plugin_manager import _install_details_options
+        from dcoder.ui.widgets.plugin_manager import _install_details_options
 
         options = _install_details_options(has_project=False)
         ids = [o.id for o in options]
@@ -463,7 +463,7 @@ class TestTUIInstallOptions:
         assert "details-back" in ids
 
     def test_options_with_project(self):
-        from dcoder.ui.plugin_manager import _install_details_options
+        from dcoder.ui.widgets.plugin_manager import _install_details_options
 
         options = _install_details_options(has_project=True)
         ids = [o.id for o in options]

@@ -38,7 +38,7 @@ class LoginHandler(BaseCommandHandler):
         if ctx.app is None:
             return CommandResult(success=False, message="App context not available.")
 
-        from dcoder.ui.auth_manager import AuthManagerScreen
+        from dcoder.ui.widgets.auth_manager import AuthManagerScreen
         initial_provider = ctx.args.strip() or None
         screen = AuthManagerScreen(initial_provider=initial_provider)
 

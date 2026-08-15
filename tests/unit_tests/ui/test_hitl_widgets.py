@@ -4,14 +4,14 @@
 - toast.py & notification_center.py
 """
 
-from dcoder.ui.approval import (
+from dcoder.ui.widgets.approval import (
     ApprovalDecided,
     ApprovalMenu,
     assess_tool_risk,
 )
-from dcoder.ui.ask_user import AskUserMenu
-from dcoder.ui._ask_user_types import Question
-from dcoder.ui.notification_center import NotificationCenter
+from dcoder.ui.widgets.ask_user import AskUserMenu
+from dcoder.ui.widgets._ask_user_types import Question
+from dcoder.ui.widgets.notification_center import NotificationCenter
 
 
 import pytest

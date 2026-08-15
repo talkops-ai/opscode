@@ -326,11 +326,19 @@ def _convert_ai_message(data: dict[str, Any]) -> Any:
     usage_metadata = data.get("usage_metadata")
     response_metadata = data.get("response_metadata", {})
 
+    additional_kwargs = dict(data.get("additional_kwargs") or {})
+    if "reasoning_content" in data and "reasoning_content" not in additional_kwargs:
+        additional_kwargs["reasoning_content"] = data["reasoning_content"]
+    if "thinking" in data and "thinking" not in additional_kwargs:
+        additional_kwargs["thinking"] = data["thinking"]
+
     kwargs: dict[str, Any] = {
         "content": content,
         "id": data.get("id"),
         "response_metadata": response_metadata,
     }
+    if additional_kwargs:
+        kwargs["additional_kwargs"] = additional_kwargs
 
     if tool_call_chunks:
         kwargs["tool_call_chunks"] = [

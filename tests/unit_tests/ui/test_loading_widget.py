@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from textual.app import App, ComposeResult
-from dcoder.ui.loading import LoadingWidget, Spinner, format_duration
+from dcoder.ui.widgets.loading import LoadingWidget, Spinner, format_duration
 
 
 class DummyLoadingApp(App[None]):

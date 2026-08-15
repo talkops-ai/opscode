@@ -38,7 +38,7 @@ class CopyHandler(BaseCommandHandler):
                 content = ctx.app.get_latest_assistant_message()
             elif hasattr(ctx.app, "query"):
                 try:
-                    from dcoder.ui.messages import AssistantMessage
+                    from dcoder.ui.widgets.messages import AssistantMessage
                     msgs = list(ctx.app.query(AssistantMessage))
                     for latest in reversed(msgs):
                         msg_text = getattr(latest, "content_text", None) or getattr(latest, "content", None) or "".join(getattr(latest, "_fragments", []))

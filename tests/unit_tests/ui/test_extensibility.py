@@ -6,7 +6,7 @@
 
 from dcoder.plugins import discover_plugins
 from dcoder.ui.preferences import UserPreferences, load_preferences
-from dcoder.ui.welcome import WelcomeBanner
+from dcoder.ui.widgets.welcome import WelcomeBanner
 
 
 def test_discover_plugins():

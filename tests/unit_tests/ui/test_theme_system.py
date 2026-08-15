@@ -11,7 +11,7 @@ from dcoder.ui.theme import (
     save_terminal_theme_mapping,
     reload_registry,
 )
-from dcoder.ui.theme_selector import ThemeSelectorScreen
+from dcoder.ui.widgets.theme_selector import ThemeSelectorScreen
 
 
 def test_theme_registry_contains_dcoder_and_textual_builtins():

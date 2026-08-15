@@ -55,7 +55,7 @@ class CostHandler(BaseCommandHandler):
 
             if conv_tokens is None and hasattr(ctx.app, "query"):
                 try:
-                    from dcoder.ui.messages import AssistantMessage, UserMessage, ToolCallMessage
+                    from dcoder.ui.widgets.messages import AssistantMessage, UserMessage, ToolCallMessage
                     acc = 0
                     for u in ctx.app.query(UserMessage):
                         txt = getattr(u, "_raw_content", "") or ""

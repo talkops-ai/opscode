@@ -7,8 +7,8 @@
 import pytest
 from unittest.mock import Mock, MagicMock
 
-from dcoder.ui.autocomplete import AutocompletePopup
-from dcoder.ui.chat_input import ChatInput
+from dcoder.ui.widgets.autocomplete import AutocompletePopup
+from dcoder.ui.widgets.chat_input import ChatInput
 from dcoder.ui.command_registry import get_command
 
 

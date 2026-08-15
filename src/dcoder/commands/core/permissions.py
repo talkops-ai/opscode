@@ -84,7 +84,7 @@ class PermissionsHandler(BaseCommandHandler):
         if store is None:
             return CommandResult(success=False, message="Permission store not available (no app context).")
 
-        from dcoder.ui.permissions_manager import PermissionsManagerScreen
+        from dcoder.ui.widgets.permissions_manager import PermissionsManagerScreen
 
         screen = PermissionsManagerScreen(store=store)
 

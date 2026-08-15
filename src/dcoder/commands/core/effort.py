@@ -61,7 +61,7 @@ class EffortHandler(BaseCommandHandler):
                 if hasattr(ctx.app, "_reasoning_effort"):
                     ctx.app._reasoning_effort = None
                 try:
-                    from dcoder.ui.status import StatusBar
+                    from dcoder.ui.widgets.status import StatusBar
                     sb = ctx.app.query_one("#status-bar", StatusBar)
                     _spec = ctx.app._model or ""
                     _prov, _mod = (_spec.split(":", 1) if ":" in _spec else ("", _spec))
@@ -91,7 +91,7 @@ class EffortHandler(BaseCommandHandler):
         if ctx.app is not None:
             ctx.app._reasoning_effort = level
             try:
-                from dcoder.ui.status import StatusBar
+                from dcoder.ui.widgets.status import StatusBar
                 sb = ctx.app.query_one("#status-bar", StatusBar)
                 _spec = ctx.app._model or ""
                 _prov, _mod = (_spec.split(":", 1) if ":" in _spec else ("", _spec))

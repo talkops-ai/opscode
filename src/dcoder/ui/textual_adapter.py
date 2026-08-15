@@ -10,18 +10,19 @@ to avoid flooding the event queue.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 import inspect
 import logging
 import math
-import time
-
 from pathlib import Path
+import time
 from typing import TYPE_CHECKING, Any, Callable
+import uuid
 
 from textual.message import Message
 
 from dcoder.utils.session_stats import SessionStats
-from dcoder.ui._tool_stream import (
+from dcoder.ui.widgets._tool_stream import (
     ToolCallBuffer,
     ToolCallBufferKey,
     tool_call_buffer_key,
@@ -31,10 +32,20 @@ from dcoder.ui._tool_stream import (
 from dcoder.config.settings import get_glyphs
 
 if TYPE_CHECKING:
-    from dcoder.ui.messages import MessageList
-    from dcoder.ui.status import StatusBar
+    from dcoder.ui.widgets.messages import MessageList
+    from dcoder.ui.widgets.status import StatusBar
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _TurnStreamState:
+    thinking_start_t: float | None = None
+    turn_context_tokens: int = 0
+    assistant_message_by_namespace: dict[tuple[str, ...], Any] = field(default_factory=dict)
+    pending_text_by_namespace: dict[tuple[str, ...], str] = field(default_factory=dict)
+    tool_call_buffers: dict[ToolCallBufferKey, ToolCallBuffer] = field(default_factory=dict)
+    displayed_tool_ids: set[str] = field(default_factory=set)
 
 
 def _read_mentioned_file(file_path: Path, max_embed_bytes: int = 256 * 1024) -> str:
@@ -393,81 +404,97 @@ class TextualAdapter:
         """
         self._client = client
 
-    # ── Public Stream API ─────────────────────────────────
+    # ── Subroutines for stream_turn ───────────────────────
 
-    async def stream_turn(
+    def _prepare_stream_input(
         self,
         prompt: str,
-        *,
-        thread_id: str,
-        context: dict[str, Any] | None = None,
-        graph_input: dict[str, Any] | None = None,
-    ) -> None:
-        """Run one agent turn, routing stream events to Textual widgets."""
-        import uuid
-        from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage
+        graph_input: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], str | None]:
+        """Build the graph input payload and turn ID.
+
+        Returns:
+            tuple[input_payload_dict, turn_id]
+        """
+        from langchain_core.messages import HumanMessage
         from dcoder.middleware.auto_mode import USER_PROMPT_METADATA_KEY, user_prompt_metadata
 
-        turn_id: str | None = None
-
         if graph_input is not None:
-            input_msg: dict[str, Any] = graph_input
+            return graph_input, None
+
+        from dcoder.input import parse_file_mentions
+
+        prompt_text, mentioned_files = parse_file_mentions(prompt)
+        max_embed_bytes = 256 * 1024
+
+        if mentioned_files:
+            context_parts = [prompt_text, "\n\n## Referenced Files\n"]
+            for file_path in mentioned_files:
+                try:
+                    part = _read_mentioned_file(file_path, max_embed_bytes)
+                    context_parts.append(part)
+                except Exception as e:
+                    context_parts.append(f"\n### {file_path.name}\n[Error reading file: {e}]")
+            final_content = "\n".join(context_parts)
         else:
-            from dcoder.input import parse_file_mentions
+            final_content = prompt_text
 
-            prompt_text, mentioned_files = parse_file_mentions(prompt)
-            max_embed_bytes = 256 * 1024
+        self._turn_number += 1
+        turn_id = str(uuid.uuid4())
 
-            if mentioned_files:
-                context_parts = [prompt_text, "\n\n## Referenced Files\n"]
-                for file_path in mentioned_files:
-                    try:
-                        part = _read_mentioned_file(file_path, max_embed_bytes)
-                        context_parts.append(part)
-                    except Exception as e:
-                        context_parts.append(f"\n### {file_path.name}\n[Error reading file: {e}]")
-                final_content = "\n".join(context_parts)
-            else:
-                final_content = prompt_text
+        human_msg = HumanMessage(
+            content=final_content,
+            additional_kwargs={
+                USER_PROMPT_METADATA_KEY: user_prompt_metadata(
+                    literal_user_text=prompt,
+                    referenced_paths=[str(p) for p in mentioned_files],
+                    turn_id=turn_id,
+                )
+            },
+        )
+        input_msg: dict[str, Any] = {
+            "messages": [human_msg],
+            "goal_criteria_request": None,
+        }
 
-            self._turn_number += 1
-            turn_id = str(uuid.uuid4())
+        if self._app is not None:
+            from dcoder.commands.power.goal import get_goal_state, GoalHandler
 
-            human_msg = HumanMessage(
-                content=final_content,
-                additional_kwargs={
-                    USER_PROMPT_METADATA_KEY: user_prompt_metadata(
-                        literal_user_text=prompt,
-                        referenced_paths=[str(p) for p in mentioned_files],
-                        turn_id=turn_id,
-                    )
-                },
-            )
-            input_msg = {
-                "messages": [human_msg],
-                "goal_criteria_request": None,
-            }
-
-            if self._app is not None:
-                from dcoder.commands.power.goal import get_goal_state, GoalHandler
-                goal_state = get_goal_state(self._app)
-                if goal_state.is_actionable and goal_state.objective:
-                    input_msg["_goal_objective"] = goal_state.objective
-                    input_msg["_goal_rubric"] = goal_state.rubric
-                    input_msg["_goal_status"] = goal_state.status
-                    if goal_state.rubric:
-                        input_msg["rubric"] = goal_state.rubric
-                elif goal_state.next_rubric:
-                    input_msg["rubric"] = goal_state.next_rubric
-                    goal_state.next_rubric = None  # One-turn quality gate
-                    GoalHandler._sync_status_rubric(self._app, goal_state)
-                elif goal_state.rubric:
+            goal_state = get_goal_state(self._app)
+            if goal_state.is_actionable and goal_state.objective:
+                input_msg["_goal_objective"] = goal_state.objective
+                input_msg["_goal_rubric"] = goal_state.rubric
+                input_msg["_goal_status"] = goal_state.status
+                if goal_state.rubric:
                     input_msg["rubric"] = goal_state.rubric
+            elif goal_state.next_rubric:
+                input_msg["rubric"] = goal_state.next_rubric
+                goal_state.next_rubric = None  # One-turn quality gate
+                GoalHandler._sync_status_rubric(self._app, goal_state)
+            elif goal_state.rubric:
+                input_msg["rubric"] = goal_state.rubric
 
-        from dcoder.approval_mode import ApprovalMode, approval_mode_key, awrite_approval_mode, coerce_approval_mode
+        return input_msg, turn_id
+
+    async def _prepare_stream_config(
+        self,
+        thread_id: str,
+        turn_id: str | None,
+        context: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Build stream configuration and enriched context dict.
+
+        Returns:
+            tuple[config_dict, enriched_context_dict]
+        """
+        from dcoder.approval_mode import ApprovalMode, awrite_approval_mode, coerce_approval_mode
         from dcoder.config.metadata import build_stream_config
 
-        raw_mode = getattr(self._app, "_approval_mode", ApprovalMode.MANUAL) if self._app is not None else ApprovalMode.MANUAL
+        raw_mode = (
+            getattr(self._app, "_approval_mode", ApprovalMode.MANUAL)
+            if self._app is not None
+            else ApprovalMode.MANUAL
+        )
         selected_mode = raw_mode if isinstance(raw_mode, ApprovalMode) else coerce_approval_mode(raw_mode)
 
         agent_obj = (
@@ -482,7 +509,7 @@ class TextualAdapter:
             except Exception:
                 logger.warning("Failed to persist approval mode to store", exc_info=True)
 
-        auto_approve_active = (selected_mode is ApprovalMode.YOLO)
+        auto_approve_active = selected_mode is ApprovalMode.YOLO
 
         eff = None
         if self._app is not None:
@@ -501,52 +528,371 @@ class TextualAdapter:
             auto_approve=auto_approve_active,
             reasoning_effort=eff or "medium",
         )
+
         if context is None or not isinstance(context, dict):
             context = {}
-        context["thread_id"] = thread_id
+        enriched_context = context
+        enriched_context["thread_id"] = thread_id
         if turn_id is not None:
-            context["turn_id"] = turn_id
-
-        context["approval_mode"] = selected_mode.value
-        context["auto_approve"] = (selected_mode is ApprovalMode.YOLO)
+            enriched_context["turn_id"] = turn_id
+        enriched_context["approval_mode"] = selected_mode.value
+        enriched_context["auto_approve"] = auto_approve_active
         if live_key is not None:
-            context["approval_mode_key"] = live_key
+            enriched_context["approval_mode_key"] = live_key
         else:
-            context.pop("approval_mode_key", None)
+            enriched_context.pop("approval_mode_key", None)
 
-        logger.debug("TUI: stream_turn start, thread_id: %s, context: %s", thread_id, context)
+        logger.debug("TUI: stream_turn start, thread_id: %s, context: %s", thread_id, enriched_context)
+        return config, enriched_context
+
+    def _handle_custom_stream_event(self, data: Any, is_main_agent: bool) -> None:
+        """Handle mode == 'custom' stream event payloads."""
+        if isinstance(data, dict) and data.get("type") == "session_cost":
+            total_usd = data.get("total")
+            if isinstance(total_usd, (int, float)) and math.isfinite(total_usd) and total_usd >= 0:
+                cost_val = float(total_usd)
+                self._stats.total_cost_usd = cost_val
+                if self._app:
+                    setattr(self._app, "_session_cost_usd", cost_val)
+                if self._status_bar is not None:
+                    self._status_bar.set_cost(cost_val)
+            return
+
+        if self._on_subagent_event is not None and _is_renderable_subagent_event(data, is_main_agent=is_main_agent):
+            try:
+                self._on_subagent_event(data)
+            except Exception:
+                logger.exception("subagent panel event handler failed")
+        elif isinstance(data, dict):
+            rubric_msg = data
+            formatted_event = _format_rubric_event(rubric_msg)
+            if formatted_event is not None and is_main_agent and self._messages is not None:
+                details = (
+                    _format_rubric_details(rubric_msg, goal_active=True)
+                    if rubric_msg.get("type") == "rubric_evaluation_end"
+                    else ""
+                )
+                from dcoder.ui.widgets.messages import RubricResultMessage, SystemMessage, ErrorMessage
+
+                if rubric_msg.get("type") == "rubric_evaluation_end":
+                    if self._app is not None and hasattr(self._app, "_handle_rubric_evaluation_end"):
+                        try:
+                            self._app._handle_rubric_evaluation_end(rubric_msg)
+                        except Exception:
+                            pass
+                    if rubric_msg.get("result") == "grader_error":
+                        widget = ErrorMessage(
+                            "Acceptance-criteria grading failed because of a grader or "
+                            "infrastructure error. The goal remains active, and its "
+                            "completion request is still pending; it will be re-graded on "
+                            "your next turn."
+                        )
+                    elif details:
+                        widget = RubricResultMessage(formatted_event, details)
+                    else:
+                        widget = SystemMessage(formatted_event)
+                else:
+                    widget = SystemMessage(formatted_event)
+                self._messages.mount(widget)
+
+    def _handle_updates_stream_event(
+        self,
+        data: Any,
+        pending_interrupts: dict[str, Any],
+    ) -> None:
+        """Handle mode == 'updates' stream event payloads and record interrupts."""
+        if not isinstance(data, dict):
+            return
+        interrupts = data.get("__interrupt__")
+        if interrupts:
+            for interrupt_obj in interrupts:
+                interrupt_id = getattr(interrupt_obj, "id", None)
+                interrupt_val = getattr(interrupt_obj, "value", None)
+                if interrupt_val and interrupt_id:
+                    logger.debug("TUI: Handle interrupt %s: %s", interrupt_id, interrupt_val)
+                    pending_interrupts[interrupt_id] = interrupt_val
+
+    async def _handle_messages_stream_event(
+        self,
+        data: Any,
+        ns_key: tuple[str, ...],
+        is_main_agent: bool,
+        stream_state: _TurnStreamState,
+    ) -> None:
+        """Handle mode == 'messages' stream event payloads."""
+        from langchain_core.messages import HumanMessage, ToolMessage
+
+        msg_obj, meta = data if isinstance(data, tuple) else (data, {})
+
+        # 1. Update token usage stats
+        usage_meta = (
+            getattr(msg_obj, "usage_metadata", None)
+            or (getattr(msg_obj, "response_metadata", None) or {}).get("usage")
+            or (getattr(msg_obj, "response_metadata", None) or {}).get("token_usage")
+            or (meta or {}).get("usage")
+        )
+        if isinstance(usage_meta, dict):
+            inp_toks = usage_meta.get("input_tokens") or usage_meta.get("prompt_tokens") or 0
+            out_toks = usage_meta.get("output_tokens") or usage_meta.get("completion_tokens") or 0
+            if inp_toks > 0:
+                self._stats.input_tokens = inp_toks
+            if out_toks > 0:
+                self._stats.output_tokens = out_toks
+            if inp_toks > 0 or out_toks > 0:
+                context_toks = (inp_toks or 0) + (out_toks or 0)
+                stream_state.turn_context_tokens = context_toks
+                prior_tokens = getattr(self._app, "_cumulative_session_tokens", 0) if self._app else 0
+                total_tokens = prior_tokens + context_toks
+                if self._app:
+                    setattr(self._app, "_context_tokens", total_tokens)
+                if self._status_bar is not None:
+                    self._status_bar.set_tokens(total_tokens)
+
+        # 2. Tool result update
+        if isinstance(msg_obj, ToolMessage) or msg_obj.__class__.__name__ == "ToolMessage":
+            call_id = getattr(msg_obj, "tool_call_id", "") or ""
+            raw_name = getattr(msg_obj, "name", "") or ""
+            tool_name = (
+                raw_name
+                if (raw_name and raw_name != "None")
+                else self._active_tools_map.get(call_id, "tool")
+            )
+            content = str(getattr(msg_obj, "content", ""))
+            if self._messages is not None and is_main_agent:
+                self._messages.update_tool_result(call_id=call_id, result=content, name=tool_name)
+            if self._set_spinner:
+                try:
+                    await self._set_spinner("Thinking")
+                except Exception:
+                    pass
+
+        # 3. Human message flush
+        elif isinstance(msg_obj, HumanMessage):
+            pending_text = stream_state.pending_text_by_namespace.get(ns_key, "")
+            if pending_text and self._messages is not None and is_main_agent:
+                self._messages.finish_assistant_message()
+            stream_state.pending_text_by_namespace[ns_key] = ""
+            stream_state.assistant_message_by_namespace.pop(ns_key, None)
+
+        # 4. AIMessage / AIMessageChunk
+        else:
+            text, thinking = _extract_text_and_thinking(
+                getattr(msg_obj, "content", ""),
+                getattr(msg_obj, "additional_kwargs", None),
+                getattr(msg_obj, "response_metadata", None),
+                msg_obj=msg_obj,
+            )
+
+            if thinking:
+                if stream_state.thinking_start_t is None:
+                    stream_state.thinking_start_t = time.time()
+                thinking_dur = time.time() - stream_state.thinking_start_t
+                if self._messages is not None and is_main_agent:
+                    self._messages.append_thinking_token(thinking, duration_seconds=thinking_dur)
+                if self._set_spinner:
+                    try:
+                        await self._set_spinner("Thinking")
+                    except Exception:
+                        pass
+
+            if text:
+                pending_text = stream_state.pending_text_by_namespace.get(ns_key, "")
+                pending_text += text
+                stream_state.pending_text_by_namespace[ns_key] = pending_text
+                if ns_key not in stream_state.assistant_message_by_namespace:
+                    stream_state.assistant_message_by_namespace[ns_key] = True
+                    if self._set_spinner:
+                        try:
+                            await self._set_spinner("Thinking")
+                        except Exception:
+                            pass
+
+                if self._messages is not None and is_main_agent:
+                    self._messages.append_assistant_token(text)
+
+            # Process tool call chunks
+            tool_chunks = getattr(msg_obj, "tool_call_chunks", []) or []
+            if not tool_chunks and hasattr(msg_obj, "content_blocks"):
+                tool_chunks = [
+                    b
+                    for b in msg_obj.content_blocks
+                    if isinstance(b, dict) and b.get("type") in {"tool_call_chunk", "tool_call"}
+                ]
+            for block in tool_chunks:
+                chunk_name = block.get("name")
+                chunk_args = block.get("args")
+                chunk_id = block.get("id")
+                chunk_index = block.get("index")
+
+                buffer_key = tool_call_buffer_key(chunk_index, chunk_id, len(stream_state.tool_call_buffers))
+                buffer = stream_state.tool_call_buffers.setdefault(buffer_key, ToolCallBuffer())
+                buffer.ingest(name=chunk_name, tool_id=chunk_id, args=chunk_args)
+
+                buffer_name = buffer.name
+                buffer_id = buffer.tool_id
+                if buffer_name is None:
+                    continue
+
+                parsed_args = buffer.parse_args()
+                if parsed_args is None:
+                    continue
+
+                if self._messages is not None and is_main_agent:
+                    self._messages.finish_assistant_message()
+                stream_state.pending_text_by_namespace.pop(ns_key, None)
+                stream_state.assistant_message_by_namespace.pop(ns_key, None)
+
+                if buffer_id is not None and buffer_id not in stream_state.displayed_tool_ids:
+                    stream_state.displayed_tool_ids.add(buffer_id)
+                    if self._set_spinner:
+                        try:
+                            await self._set_spinner("Thinking")
+                        except Exception:
+                            pass
+
+                    if self._messages is not None and is_main_agent:
+                        self._messages.add_tool_call(name=buffer_name, call_id=buffer_id, args=parsed_args)
+                        self._active_tools_map[buffer_id] = buffer_name
+
+    async def _resolve_pending_interrupts(
+        self,
+        pending_interrupts: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve pending HITL interrupts and return the Command resume dict."""
+        resume_payload: dict[str, Any] = {}
+        req_approval_fn = self._effective_request_approval
+
+        for int_id, int_val in list(pending_interrupts.items()):
+            action_requests = int_val.get("action_requests", []) if isinstance(int_val, dict) else []
+
+            if self._auto_approve:
+                decisions = [{"type": "approve"} for _ in action_requests]
+                resume_payload[int_id] = {"decisions": decisions}
+                continue
+
+            if req_approval_fn is not None:
+                future = await req_approval_fn(action_requests, self._assistant_id)
+                decision = await future
+
+                if (
+                    isinstance(decision, dict)
+                    and decision.get("type") == "auto_approve_all"
+                    and getattr(self._app, "_on_auto_approve_enabled", None) is not None
+                ):
+                    callback_result = self._app._on_auto_approve_enabled()
+                    enabled = (
+                        await callback_result
+                        if inspect.isawaitable(callback_result)
+                        else callback_result
+                    )
+                    if enabled is None:
+                        enabled = True
+                    if enabled is False:
+                        continue
+
+                if isinstance(decision, dict):
+                    decision_type = decision.get("type")
+                    if decision_type in {"approve", "auto_approve_all"}:
+                        decisions = [{"type": "approve"} for _ in action_requests]
+                    elif decision_type == "switch_manual":
+                        decisions = [{"type": "reject"} for _ in action_requests]
+                    elif decision_type == "reject":
+                        reject_msg = decision.get("message")
+                        rej_dict: dict[str, Any] = {"type": "reject"}
+                        if reject_msg:
+                            rej_dict["message"] = reject_msg
+                        decisions = [rej_dict for _ in action_requests]
+                    else:
+                        decisions = [{"type": "approve"} for _ in action_requests]
+                else:
+                    decisions = [{"type": "approve"} for _ in action_requests]
+                resume_payload[int_id] = {"decisions": decisions}
+            else:
+                # Backwards-compatible fallback
+                call_ids = [f"{int_id}_{i}" for i in range(len(action_requests))]
+                for i, req in enumerate(action_requests):
+                    if self._app:
+                        self._app.post_message(
+                            self.InterruptRaised(
+                                tool_name=req.get("action") or req.get("name", "unknown"),
+                                call_id=call_ids[i],
+                                args=req.get("args", {}),
+                            )
+                        )
+                if call_ids:
+                    approved_results = await asyncio.gather(*(self._await_approval(cid) for cid in call_ids))
+                    decisions = [{"type": "approve" if approved else "reject"} for approved in approved_results]
+                else:
+                    decisions = []
+                resume_payload[int_id] = {"decisions": decisions}
+
+        return resume_payload
+
+    def _finalize_turn_success(self, start_t: float, turn_context_tokens: int) -> None:
+        """Update session stats and post StreamFinished message."""
+        self._stats.request_count += 1
+        if self._status_bar is not None:
+            total_tokens = self._stats.input_tokens + self._stats.output_tokens
+            self._status_bar.set_tokens(total_tokens)
+        if self._app:
+            self._app.post_message(self.StreamFinished(self._stats))
+
+    def _finalize_turn_error(self, error: Exception) -> None:
+        """Handle turn exception: finish assistant message, mount error, and post StreamError."""
+        logger.exception("TUI: stream_turn Exception: %s", error)
+        if self._messages is not None:
+            self._messages.finish_assistant_message()
+            from dcoder.ui.widgets.messages import ErrorMessage
+
+            self._messages.mount(ErrorMessage(f"Agent execution failed: {error}"))
+        if self._app:
+            self._app.post_message(self.StreamError(str(error)))
+
+    async def _finalize_turn_cleanup(self, start_t: float, turn_context_tokens: int) -> None:
+        """Final cleanup logic executed in the finally block."""
+        self._stats.wall_time_seconds += time.time() - start_t
+        if self._app and turn_context_tokens > 0:
+            prior = getattr(self._app, "_cumulative_session_tokens", 0)
+            setattr(self._app, "_cumulative_session_tokens", prior + turn_context_tokens)
+        # Dismiss the spinner and clear the status bar on turn end.
+        if self._set_spinner:
+            try:
+                await self._set_spinner(None)
+            except Exception:
+                pass
+        if self._status_bar is not None:
+            self._status_bar.set_status("")
+        logger.debug("TUI: stream_turn finally complete")
+
+    # ── Public Stream API ─────────────────────────────────
+
+    async def stream_turn(
+        self,
+        prompt: str,
+        *,
+        thread_id: str,
+        context: dict[str, Any] | None = None,
+        graph_input: dict[str, Any] | None = None,
+    ) -> None:
+        """Run one agent turn, routing stream events to Textual widgets."""
+        from langgraph.types import Command
+
+        # 1. Prepare input and configuration
+        input_msg, turn_id = self._prepare_stream_input(prompt, graph_input)
+        config, enriched_context = await self._prepare_stream_config(thread_id, turn_id, context)
 
         start_t = time.time()
         self._stats.input_tokens += max(1, len(prompt) // 4)
         if self._status_bar is not None:
-            total_tokens = self._stats.input_tokens + self._stats.output_tokens
-            self._status_bar.set_tokens(total_tokens)
+            self._status_bar.set_tokens(self._stats.input_tokens + self._stats.output_tokens)
 
-        thinking_start_t: float | None = None
-
-
-        first_token_received = False
-        turn_context_tokens = 0
+        stream_state = _TurnStreamState()
+        stream_input: Any = input_msg
 
         try:
-            stream_input: Any = input_msg
-            
-            # Map tracking active assistant messages and pending text by namespace
-            assistant_message_by_namespace: dict[tuple, Any] = {}
-            pending_text_by_namespace: dict[tuple, str] = {}
-            
-            # Buffers for tool call streaming
-            tool_call_buffers: dict[ToolCallBufferKey, ToolCallBuffer] = {}
-            displayed_tool_ids: set[str] = set()
-
             while True:
-                logger.debug("TUI: calling agent.astream...")
-
-                interrupt_occurred = False
-                resume_payload: dict[str, Any] = {}
                 pending_interrupts: dict[str, Any] = {}
 
-                # Show the Thinking spinner before each astream iteration
                 if self._set_spinner and not getattr(self, "_current_tool_messages", {}):
                     await self._set_spinner("Thinking")
 
@@ -555,7 +901,7 @@ class TextualAdapter:
                     stream_mode=["messages", "updates", "custom"],
                     subgraphs=True,
                     config=config,
-                    context=context,
+                    context=enriched_context,
                 ):
                     if self._cancel_event.is_set():
                         logger.debug("TUI: cancel event is set, breaking stream loop")
@@ -569,168 +915,17 @@ class TextualAdapter:
                     is_main_agent = ns_key == ()
 
                     if current_stream_mode == "custom":
-                        if isinstance(data, dict) and data.get("type") == "session_cost":
-                            total_usd = data.get("total")
-                            if isinstance(total_usd, (int, float)) and math.isfinite(total_usd) and total_usd >= 0:
-                                cost_val = float(total_usd)
-                                self._stats.total_cost_usd = cost_val
-                                if self._app:
-                                    setattr(self._app, "_session_cost_usd", cost_val)
-                                if self._status_bar is not None:
-                                    self._status_bar.set_cost(cost_val)
-                            continue
-
-                        if (
-                            self._on_subagent_event is not None
-                            and _is_renderable_subagent_event(data, is_main_agent=is_main_agent)
-                        ):
-                            try:
-                                self._on_subagent_event(data)
-                            except Exception:
-                                logger.exception("subagent panel event handler failed")
-                        elif isinstance(data, dict):
-                            rubric_msg = data
-                            formatted_event = _format_rubric_event(rubric_msg)
-                            if formatted_event is not None and is_main_agent and self._messages is not None:
-                                details = (
-                                    _format_rubric_details(rubric_msg, goal_active=True)
-                                    if rubric_msg.get("type") == "rubric_evaluation_end"
-                                    else ""
-                                )
-                                from dcoder.ui.messages import RubricResultMessage, SystemMessage, ErrorMessage
-                                if rubric_msg.get("type") == "rubric_evaluation_end":
-                                    if self._app is not None and hasattr(self._app, "_handle_rubric_evaluation_end"):
-                                        try:
-                                            self._app._handle_rubric_evaluation_end(rubric_msg)
-                                        except Exception:
-                                            pass
-                                    if rubric_msg.get("result") == "grader_error":
-                                        widget = ErrorMessage(
-                                            "Acceptance-criteria grading failed because of a grader or "
-                                            "infrastructure error. The goal remains active, and its "
-                                            "completion request is still pending; it will be re-graded on "
-                                            "your next turn."
-                                        )
-                                    elif details:
-                                        widget = RubricResultMessage(formatted_event, details)
-                                    else:
-                                        widget = SystemMessage(formatted_event)
-                                else:
-                                    widget = SystemMessage(formatted_event)
-                                self._messages.mount(widget)
-                        continue
-
+                        self._handle_custom_stream_event(data, is_main_agent)
                     elif current_stream_mode == "updates":
-                        if not isinstance(data, dict):
-                            continue
-                        interrupts = data.get("__interrupt__")
-                        if interrupts:
-                            interrupt_occurred = True
-                            for interrupt_obj in interrupts:
-                                interrupt_id = getattr(interrupt_obj, "id", None)
-                                interrupt_val = getattr(interrupt_obj, "value", None)
-                                
-                                if interrupt_val and interrupt_id:
-                                    logger.debug("TUI: Handle interrupt %s: %s", interrupt_id, interrupt_val)
-                                    pending_interrupts[interrupt_id] = interrupt_val
-                                    
+                        self._handle_updates_stream_event(data, pending_interrupts)
                     elif current_stream_mode == "messages":
-                        msg_obj, meta = data if isinstance(data, tuple) else (data, {})
-                        
-                        # Handle usage stats
-                        usage_meta = (
-                            getattr(msg_obj, "usage_metadata", None)
-                            or (getattr(msg_obj, "response_metadata", None) or {}).get("usage")
-                            or (getattr(msg_obj, "response_metadata", None) or {}).get("token_usage")
-                            or (meta or {}).get("usage")
+                        await self._handle_messages_stream_event(
+                            data, ns_key, is_main_agent, stream_state
                         )
-                        if isinstance(usage_meta, dict):
-                            inp_toks = usage_meta.get("input_tokens") or usage_meta.get("prompt_tokens") or 0
-                            out_toks = usage_meta.get("output_tokens") or usage_meta.get("completion_tokens") or 0
-                            if inp_toks > 0:
-                                self._stats.input_tokens = inp_toks
-                            if out_toks > 0:
-                                self._stats.output_tokens = out_toks
-                            if inp_toks > 0 or out_toks > 0:
-                                context_toks = (inp_toks or 0) + (out_toks or 0)
-                                turn_context_tokens = context_toks
-                                prior_tokens = getattr(self._app, "_cumulative_session_tokens", 0) if self._app else 0
-                                total_tokens = prior_tokens + context_toks
-                                if self._app:
-                                    setattr(self._app, "_context_tokens", total_tokens)
-                                if self._status_bar is not None:
-                                    self._status_bar.set_tokens(total_tokens)
-
-                        if msg_obj.__class__.__name__ == "ToolMessage":
-                            call_id = getattr(msg_obj, "tool_call_id", "") or ""
-                            raw_name = getattr(msg_obj, "name", "") or ""
-                            tool_name = raw_name if (raw_name and raw_name != "None") else self._active_tools_map.get(call_id, "tool")
-                            content = str(getattr(msg_obj, "content", ""))
-                            if self._messages is not None and is_main_agent:
-                                self._messages.update_tool_result(call_id=call_id, result=content, name=tool_name)
-                            if self._set_spinner:
-                                try:
-                                    await self._set_spinner("Thinking")
-                                except Exception:
-                                    pass
-
-                        # Process AIMessageChunk blocks
-                        elif hasattr(msg_obj, "content_blocks"):
-                            blocks = msg_obj.content_blocks
-                            for block in blocks:
-                                block_type = block.get("type")
-
-                                if block_type == "text":
-                                    text = block.get("text", "")
-                                    if text:
-                                        pending_text = pending_text_by_namespace.get(ns_key, "")
-                                        pending_text += text
-                                        pending_text_by_namespace[ns_key] = pending_text
-                                        if ns_key not in assistant_message_by_namespace:
-                                            assistant_message_by_namespace[ns_key] = True
-                                            if self._set_spinner:
-                                                await self._set_spinner("Thinking")
-
-                                        if self._messages is not None and is_main_agent:
-                                            self._messages.append_assistant_token(text)
-
-                                elif block_type in {"tool_call_chunk", "tool_call"}:
-                                    chunk_name = block.get("name")
-                                    chunk_args = block.get("args")
-                                    chunk_id = block.get("id")
-                                    chunk_index = block.get("index")
-
-                                    buffer_key = tool_call_buffer_key(chunk_index, chunk_id, len(tool_call_buffers))
-                                    buffer = tool_call_buffers.setdefault(buffer_key, ToolCallBuffer())
-                                    buffer.ingest(name=chunk_name, tool_id=chunk_id, args=chunk_args)
-
-                                    buffer_name = buffer.name
-                                    buffer_id = buffer.tool_id
-                                    if buffer_name is None:
-                                        continue
-
-                                    parsed_args = buffer.parse_args()
-                                    if parsed_args is None:
-                                        continue
-
-                                    if self._messages is not None and is_main_agent:
-                                        self._messages.finish_assistant_message()
-                                    pending_text_by_namespace.pop(ns_key, None)
-                                    assistant_message_by_namespace.pop(ns_key, None)
-
-                                    if buffer_id is not None and buffer_id not in displayed_tool_ids:
-                                        displayed_tool_ids.add(buffer_id)
-                                        if self._set_spinner:
-                                            await self._set_spinner("Thinking")
-
-                                        if self._messages is not None and is_main_agent:
-                                            self._messages.add_tool_call(name=buffer_name, call_id=buffer_id, args=parsed_args)
-                                            self._active_tools_map[buffer_id] = buffer_name
 
                 if self._cancel_event.is_set():
                     break
 
-                logger.debug("TUI: stream loop complete, finishing assistant message and regrouping tools")
                 if self._messages is not None:
                     self._messages.finish_assistant_message()
                     regroup_fn = getattr(self._messages, "regroup_completed_tools", None)
@@ -738,87 +933,15 @@ class TextualAdapter:
                         res = regroup_fn()
                         if inspect.isawaitable(res):
                             await res
-                    
+
                 if pending_interrupts:
-                    req_approval_fn = self._effective_request_approval
-                    for int_id, int_val in list(pending_interrupts.items()):
-                        action_requests = int_val.get("action_requests", []) if isinstance(int_val, dict) else []
-
-                        if self._auto_approve:
-                            decisions = [{"type": "approve"} for _ in action_requests]
-                            resume_payload[int_id] = {"decisions": decisions}
-                            continue
-
-                        if req_approval_fn is not None:
-                            future = await req_approval_fn(
-                                action_requests, self._assistant_id
-                            )
-                            decision = await future
-
-                            if (
-                                isinstance(decision, dict)
-                                and decision.get("type") == "auto_approve_all"
-                                and getattr(self._app, "_on_auto_approve_enabled", None) is not None
-                            ):
-                                callback_result = self._app._on_auto_approve_enabled()
-                                enabled = (
-                                    await callback_result
-                                    if inspect.isawaitable(callback_result)
-                                    else callback_result
-                                )
-                                if enabled is None:
-                                    enabled = True
-                                if enabled is False:
-                                    continue
-
-                            if isinstance(decision, dict):
-                                decision_type = decision.get("type")
-                                if decision_type in {"approve", "auto_approve_all"}:
-                                    decisions = [{"type": "approve"} for _ in action_requests]
-                                elif decision_type == "switch_manual":
-                                    decisions = [{"type": "reject"} for _ in action_requests]
-                                elif decision_type == "reject":
-                                    reject_msg = decision.get("message")
-                                    rej_dict: dict[str, Any] = {"type": "reject"}
-                                    if reject_msg:
-                                        rej_dict["message"] = reject_msg
-                                    decisions = [rej_dict for _ in action_requests]
-                                else:
-                                    decisions = [{"type": "approve"} for _ in action_requests]
-                            else:
-                                decisions = [{"type": "approve"} for _ in action_requests]
-                            resume_payload[int_id] = {"decisions": decisions}
-                        else:
-                            # Backwards-compatible fallback
-                            call_ids = [f"{int_id}_{i}" for i in range(len(action_requests))]
-                            for i, req in enumerate(action_requests):
-                                if self._app:
-                                    self._app.post_message(
-                                        self.InterruptRaised(
-                                            tool_name=req.get("action") or req.get("name", "unknown"),
-                                            call_id=call_ids[i],
-                                            args=req.get("args", {})
-                                        )
-                                    )
-                            if call_ids:
-                                approved_results = await asyncio.gather(*(self._await_approval(cid) for cid in call_ids))
-                                decisions = [{"type": "approve" if approved else "reject"} for approved in approved_results]
-                            else:
-                                decisions = []
-                            resume_payload[int_id] = {"decisions": decisions}
-
-                    from langgraph.types import Command
+                    resume_payload = await self._resolve_pending_interrupts(pending_interrupts)
                     stream_input = Command(resume=resume_payload)
                     continue
                 else:
                     break
 
-            self._stats.request_count += 1
-            if self._status_bar is not None:
-                total_tokens = self._stats.input_tokens + self._stats.output_tokens
-                self._status_bar.set_tokens(total_tokens)
-            if self._app:
-                self._app.post_message(self.StreamFinished(self._stats))
+            self._finalize_turn_success(start_t, stream_state.turn_context_tokens)
 
         except asyncio.CancelledError:
             logger.debug("TUI: stream_turn CancelledError")
@@ -826,29 +949,10 @@ class TextualAdapter:
                 self._messages.finish_assistant_message()
             raise
         except Exception as e:
-            logger.exception("TUI: stream_turn Exception: %s", e)
-            if self._messages is not None:
-                self._messages.finish_assistant_message()
-                from dcoder.ui.messages import ErrorMessage
-                self._messages.mount(ErrorMessage(f"Agent execution failed: {e}"))
-            if self._app:
-                self._app.post_message(self.StreamError(str(e)))
+            self._finalize_turn_error(e)
             raise
-
         finally:
-            self._stats.wall_time_seconds += time.time() - start_t
-            if self._app and turn_context_tokens > 0:
-                prior = getattr(self._app, "_cumulative_session_tokens", 0)
-                setattr(self._app, "_cumulative_session_tokens", prior + turn_context_tokens)
-            # Dismiss the spinner and clear the status bar on turn end.
-            if self._set_spinner:
-                try:
-                    await self._set_spinner(None)
-                except Exception:
-                    pass
-            if self._status_bar is not None:
-                self._status_bar.set_status("")
-            logger.debug("TUI: stream_turn finally complete")
+            await self._finalize_turn_cleanup(start_t, stream_state.turn_context_tokens)
 
 
     def cancel(self) -> None:

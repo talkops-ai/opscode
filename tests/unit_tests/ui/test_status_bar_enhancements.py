@@ -3,7 +3,7 @@
 import pytest
 from pathlib import Path
 from dcoder.ui.app import DCoderApp
-from dcoder.ui.status import StatusBar, ModelLabel, BranchLabel
+from dcoder.ui.widgets.status import StatusBar, ModelLabel, BranchLabel
 from dcoder.commands.power.goal import GoalState, GoalHandler
 
 
