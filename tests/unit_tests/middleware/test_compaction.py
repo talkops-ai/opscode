@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.language_models import BaseChatModel
 from deepagents.backends.filesystem import FilesystemBackend
-from dcoder.middleware.compaction import (
+from opscode.middleware.compaction import (
     CLICompactionMiddleware,
     _create_cli_compaction_middleware,
 )

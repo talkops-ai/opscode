@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import pytest
 
-from dcoder.approval_mode import (
+from opscode.approval_mode import (
     ApprovalMode,
     approval_mode_key,
     approval_mode_payload,
@@ -113,7 +113,7 @@ def test_yolo_and_auto_notice_persistence(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_store_read_write_approval_mode():
-    from dcoder.approval_mode import (
+    from opscode.approval_mode import (
         aread_approval_mode_from_store,
         awrite_approval_mode,
         read_approval_mode_from_store,

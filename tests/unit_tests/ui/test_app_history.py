@@ -1,11 +1,11 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from dcoder.ui.app import DCoderApp
-from dcoder.ui.widgets.messages import SystemMessage
+from opscode.ui.app import OpsCodeApp
+from opscode.ui.widgets.messages import SystemMessage
 
 @pytest.mark.asyncio
 async def test_finalize_connection_with_resume_thread():
-    app = DCoderApp(resume_thread="test-thread-id")
+    app = OpsCodeApp(resume_thread="test-thread-id")
     app._mount_message = AsyncMock()
     app._load_thread_history = AsyncMock()
     app.query_one = MagicMock()
@@ -26,7 +26,7 @@ async def test_finalize_connection_with_resume_thread():
 
 @pytest.mark.asyncio
 async def test_finalize_connection_without_resume_thread():
-    app = DCoderApp()
+    app = OpsCodeApp()
     app._mount_message = AsyncMock()
     app._load_thread_history = AsyncMock()
     app.query_one = MagicMock()

@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands.power.copy import CopyHandler
+from opscode.commands._base import CommandContext
+from opscode.commands.power.copy import CopyHandler
 
 
 @pytest.mark.asyncio

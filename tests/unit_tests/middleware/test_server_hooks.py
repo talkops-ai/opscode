@@ -9,13 +9,13 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
-from dcoder.hooks.interrupt import (
+from opscode.hooks.interrupt import (
     build_hook_interrupt_payload,
     build_hook_resume_value,
     parse_hook_interrupt_payload,
     parse_hook_resume_value,
 )
-from dcoder.hooks.models.domain import (
+from opscode.hooks.models.domain import (
     AgentIdentity,
     CompactTrigger,
     HookContext,
@@ -36,14 +36,14 @@ from dcoder.hooks.models.domain import (
     SubagentStopEvent,
     ToolCallData,
 )
-from dcoder.hooks.models.transport import HookInvocationRequest, HookInvocationResponse
-from dcoder.hooks.tools import format_mcp_wire_name, to_wire_call, to_wire_tool_name
-from dcoder.middleware.server_hooks import (
+from opscode.hooks.models.transport import HookInvocationRequest, HookInvocationResponse
+from opscode.hooks.tools import format_mcp_wire_name, to_wire_call, to_wire_tool_name
+from opscode.middleware.server_hooks import (
     ServerHooksMiddleware,
     ServerHooksState,
     hook_decided_permission,
 )
-from dcoder.security.approval_mode import ApprovalMode
+from opscode.security.approval_mode import ApprovalMode
 
 
 # ---------------------------------------------------------------------------

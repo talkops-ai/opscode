@@ -7,9 +7,9 @@
 import pytest
 from unittest.mock import Mock, MagicMock
 
-from dcoder.ui.widgets.autocomplete import AutocompletePopup
-from dcoder.ui.widgets.chat_input import ChatInput
-from dcoder.ui.command_registry import get_command
+from opscode.ui.widgets.autocomplete import AutocompletePopup
+from opscode.ui.widgets.chat_input import ChatInput
+from opscode.ui.command_registry import get_command
 
 
 def test_chat_input_history():

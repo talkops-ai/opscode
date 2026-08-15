@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from dcoder.ui.widgets.messages import (
+from opscode.ui.widgets.messages import (
     _TOOL_GROUP_EXCLUSIONS,
     MessageList,
     ToolCallMessage,
@@ -52,12 +52,12 @@ async def test_add_tool_call_excludes_file_edits_from_live_group():
 async def test_multiple_consecutive_tool_calls_share_live_group():
     """Verify that multiple consecutive tool calls join the same active live tool group."""
     from textual.app import App, ComposeResult
-    from dcoder.ui.theme import register_app_themes, get_theme_colors, get_css_variable_defaults
+    from opscode.ui.theme import register_app_themes, get_theme_colors, get_css_variable_defaults
 
     class TestApp(App[None]):
         def on_mount(self) -> None:
             register_app_themes(self)
-            self.theme = "dcoder-dark"
+            self.theme = "opscode-dark"
 
         def get_theme_variable_defaults(self) -> dict[str, str]:
             colors = get_theme_colors(self)
@@ -97,9 +97,9 @@ async def test_multiple_consecutive_tool_calls_share_live_group():
 async def test_load_thread_history_restores_goal_objective():
     """Verify that _load_thread_history restores active goal state using _restore_goal_rubric_state."""
     from langchain_core.messages import HumanMessage, AIMessage
-    from dcoder.ui.app import DCoderApp
+    from opscode.ui.app import OpsCodeApp
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     app._get_thread_state_values = AsyncMock(return_value={
         "_goal_objective": "i want to write vpc terraform module",
         "_goal_status": "active",
@@ -129,10 +129,10 @@ async def test_load_thread_history_restores_goal_objective():
 async def test_load_thread_history_full_turn_with_assistant_response():
     """Verify that _load_thread_history mounts AssistantMessage text for full goal turns."""
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-    from dcoder.ui.app import DCoderApp
-    from dcoder.ui.widgets.messages import AssistantMessage
+    from opscode.ui.app import OpsCodeApp
+    from opscode.ui.widgets.messages import AssistantMessage
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     app._get_thread_state_values = AsyncMock(return_value={
         "_goal_objective": "i want to write aws s3 module",
         "_goal_status": "active",

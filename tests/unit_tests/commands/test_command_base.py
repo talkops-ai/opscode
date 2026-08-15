@@ -2,8 +2,8 @@
 
 import pytest
 
-from dcoder.commands._base import BaseCommandHandler, CommandContext, CommandResult
-from dcoder.commands._types import BypassTier, CommandCategory, SafetyLevel
+from opscode.commands._base import BaseCommandHandler, CommandContext, CommandResult
+from opscode.commands._types import BypassTier, CommandCategory, SafetyLevel
 
 
 def test_command_context_immutability():

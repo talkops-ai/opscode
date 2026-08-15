@@ -1,10 +1,10 @@
-"""Unit tests for LoadingWidget & Spinner matching reference dcode implementation."""
+"""Unit tests for LoadingWidget & Spinner."""
 
 from __future__ import annotations
 
 import pytest
 from textual.app import App, ComposeResult
-from dcoder.ui.widgets.loading import LoadingWidget, Spinner, format_duration
+from opscode.ui.widgets.loading import LoadingWidget, Spinner, format_duration
 
 
 class DummyLoadingApp(App[None]):

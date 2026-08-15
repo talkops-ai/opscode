@@ -1,4 +1,4 @@
-"""Unit tests for DCoder CLI options parsing and validation."""
+"""Unit tests for OpsCode CLI options parsing and validation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 import sys
 from unittest.mock import patch
 
-from dcoder.cli.main import parse_args, _validate_args, non_negative_int, positive_int
+from opscode.cli.main import parse_args, _validate_args, non_negative_int, positive_int
 
 
 def test_positive_int_validator():
@@ -26,7 +26,7 @@ def test_non_negative_int_validator():
 
 def test_parse_args_all_matrix_flags():
     test_args = [
-        "dcoder",
+        "opscode",
         "-r", "thread-123",
         "-a", "devops_agent",
         "-M", "claude-opus-4-7",
@@ -89,7 +89,7 @@ def test_parse_args_all_matrix_flags():
 
 
 def test_validate_args_quiet_requires_non_interactive():
-    test_args = ["dcoder", "-q"]
+    test_args = ["opscode", "-q"]
     with patch.object(sys, "argv", test_args):
         args = parse_args()
         with pytest.raises(SystemExit):
@@ -97,7 +97,7 @@ def test_validate_args_quiet_requires_non_interactive():
 
 
 def test_validate_args_no_mcp_exclusive_mcp_config():
-    test_args = ["dcoder", "-n", "task", "--no-mcp", "--mcp-config", "mcp.json"]
+    test_args = ["opscode", "-n", "task", "--no-mcp", "--mcp-config", "mcp.json"]
     with patch.object(sys, "argv", test_args):
         args = parse_args()
         with pytest.raises(SystemExit):

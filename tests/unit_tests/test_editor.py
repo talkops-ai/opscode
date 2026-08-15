@@ -1,4 +1,4 @@
-"""Unit tests for External Editor module (dcoder.editor)."""
+"""Unit tests for External Editor module (opscode.editor)."""
 
 import os
 import sys
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dcoder.editor import (
+from opscode.editor import (
     ExternalEditorError,
     _prepare_command,
     open_in_editor,

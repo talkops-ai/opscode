@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext, CommandResult
+from opscode.commands._base import CommandContext, CommandResult
 
 
-from dcoder.commands.power.goal import GoalState
+from opscode.commands.power.goal import GoalState
 
 
 # ── Mock app fixture (Option C) ─────────────────────────────────────
@@ -156,11 +156,11 @@ def mock_runtime(mock_backend):
 
 @pytest.fixture
 def tmp_project_root(tmp_path):
-    """Temporary project root pre-populated with `.dcoder/` structure."""
-    dcoder_dir = tmp_path / ".dcoder"
-    dcoder_dir.mkdir()
-    (dcoder_dir / "memory").mkdir()
-    (dcoder_dir / "skills").mkdir()
+    """Temporary project root pre-populated with `.opscode/` structure."""
+    opscode_dir = tmp_path / ".opscode"
+    opscode_dir.mkdir()
+    (opscode_dir / "memory").mkdir()
+    (opscode_dir / "skills").mkdir()
     return tmp_path
 
 
@@ -169,6 +169,6 @@ def tmp_project_root(tmp_path):
 
 @pytest.fixture
 def src_root():
-    """Path to the dcoder source root (repo root)."""
+    """Path to the opscode source root (repo root)."""
     from pathlib import Path
     return Path(__file__).parent.parent.parent

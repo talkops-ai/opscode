@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands.core.model import ModelHandler
-from dcoder.model.config import get_model_profile, format_token_count
+from opscode.commands._base import CommandContext
+from opscode.commands.core.model import ModelHandler
+from opscode.model.config import get_model_profile, format_token_count
 
 
 @pytest.mark.asyncio

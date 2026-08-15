@@ -9,10 +9,10 @@ import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage, ToolMessage
 from textual.app import App, ComposeResult
 
-from dcoder.ui.remote_client import _convert_ai_message
-from dcoder.ui.textual_adapter import TextualAdapter, _extract_text_and_thinking
-from dcoder.ui.widgets.loading import LoadingWidget
-from dcoder.ui.widgets.messages import MessageList, ThinkingMessage, UserMessage
+from opscode.ui.remote_client import _convert_ai_message
+from opscode.ui.textual_adapter import TextualAdapter, _extract_text_and_thinking
+from opscode.ui.widgets.loading import LoadingWidget
+from opscode.ui.widgets.messages import MessageList, ThinkingMessage, UserMessage
 
 
 def test_convert_ai_message_preserves_reasoning_metadata():

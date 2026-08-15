@@ -1,7 +1,7 @@
 import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, Mock
-from dcoder.ui.textual_adapter import TextualAdapter
+from opscode.ui.textual_adapter import TextualAdapter
 from langgraph.types import Command
 
 

@@ -1,4 +1,4 @@
-"""Unit tests for dcoder.state.session.SessionManager."""
+"""Unit tests for opscode.state.session.SessionManager."""
 
 import pytest
 import sqlite3
@@ -7,7 +7,7 @@ from pathlib import Path
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from dcoder.state.session import SessionManager
+from opscode.state.session import SessionManager
 
 
 @pytest.fixture

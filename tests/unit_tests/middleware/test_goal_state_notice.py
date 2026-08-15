@@ -3,7 +3,7 @@
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from dcoder.middleware.goal_state_notice import (
+from opscode.middleware.goal_state_notice import (
     GOAL_CONTROL_MESSAGE_SOURCE,
     GOAL_STATE_MESSAGE_SOURCE,
     is_conversation_control_message,
@@ -131,7 +131,7 @@ class TestIsGoalStateMessage:
         assert is_goal_state_message(msg) is True
 
     def test_legacy_prefix(self):
-        from dcoder._constants import SYSTEM_MESSAGE_PREFIX
+        from opscode._constants import SYSTEM_MESSAGE_PREFIX
 
         msg = HumanMessage(
             content=f"{SYSTEM_MESSAGE_PREFIX} Goal/rubric state changed. Status: active"
@@ -176,7 +176,7 @@ class TestIsInternalMessage:
         assert is_internal_message(msg) is True
 
     def test_system_prefix_message(self):
-        from dcoder._constants import SYSTEM_MESSAGE_PREFIX
+        from opscode._constants import SYSTEM_MESSAGE_PREFIX
 
         msg = HumanMessage(content=f"{SYSTEM_MESSAGE_PREFIX} Internal notice.")
         assert is_internal_message(msg) is True

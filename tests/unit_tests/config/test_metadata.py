@@ -1,10 +1,10 @@
-"""Unit tests for dcoder.config.metadata trace metadata helpers."""
+"""Unit tests for opscode.config.metadata trace metadata helpers."""
 
 from pathlib import Path
 from unittest.mock import patch
 
-from dcoder._version import __version__
-from dcoder.config.metadata import (
+from opscode._version import __version__
+from opscode.config.metadata import (
     CODING_AGENT_INTEGRATION,
     CODING_AGENT_PURPOSE,
     CODING_AGENT_RUNTIME,
@@ -12,7 +12,7 @@ from dcoder.config.metadata import (
     build_coding_agent_metadata,
     build_stream_config,
 )
-from dcoder.utils.git import RepositoryMetadata
+from opscode.utils.git import RepositoryMetadata
 
 
 def test_build_coding_agent_metadata_basic():
@@ -48,10 +48,10 @@ def test_build_coding_agent_metadata_turn_markers_and_sandbox():
 
 def test_build_coding_agent_metadata_with_git_repo(tmp_path: Path):
     with (
-        patch("dcoder.config.metadata.resolve_git_remote_url", return_value="git@github.com:org/repo.git"),
-        patch("dcoder.config.metadata.parse_repository_metadata", return_value=RepositoryMetadata("https://github.com/org/repo", "github", "org/repo")),
-        patch("dcoder.config.metadata.resolve_git_branch", return_value="feature/test"),
-        patch("dcoder.config.metadata.resolve_git_commit_sha", return_value="a" * 40),
+        patch("opscode.config.metadata.resolve_git_remote_url", return_value="git@github.com:org/repo.git"),
+        patch("opscode.config.metadata.parse_repository_metadata", return_value=RepositoryMetadata("https://github.com/org/repo", "github", "org/repo")),
+        patch("opscode.config.metadata.resolve_git_branch", return_value="feature/test"),
+        patch("opscode.config.metadata.resolve_git_commit_sha", return_value="a" * 40),
     ):
         metadata = build_coding_agent_metadata(
             thread_id="thread-git",
@@ -78,11 +78,11 @@ def test_build_stream_config_structure():
 
     metadata = config["metadata"]
     assert metadata["thread_id"] == "stream-thread-1"
-    assert metadata["dcoder_agent_name"] == "agent"
+    assert metadata["opscode_agent_name"] == "agent"
     assert metadata["agent_name"] == "agent"
     assert metadata["turn_id"] == "turn-uuid-1"
     assert metadata["turn_number"] == 1
-    assert metadata["dcoder_auto_approve"] is True
-    assert metadata["lc_versions"] == {"dcoder": __version__}
+    assert metadata["opscode_auto_approve"] is True
+    assert metadata["lc_versions"] == {"opscode": __version__}
     assert "updated_at" in metadata
-    assert "dcoder_term_program" in metadata
+    assert "opscode_term_program" in metadata

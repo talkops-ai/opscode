@@ -1,6 +1,6 @@
 """Unit tests for JS Interpreter (_js_eval_display) output parser."""
 
-from dcoder.ui.widgets._js_eval_display import (
+from opscode.ui.widgets._js_eval_display import (
     JsEvalError,
     JsEvalResult,
     JsEvalStdout,

@@ -4,26 +4,26 @@ import os
 from unittest.mock import patch
 from pathlib import Path
 
-from dcoder.ui.theme import (
+from opscode.ui.theme import (
     get_registry,
     load_theme_preference,
     save_theme_preference,
     save_terminal_theme_mapping,
     reload_registry,
 )
-from dcoder.ui.widgets.theme_selector import ThemeSelectorScreen
+from opscode.ui.widgets.theme_selector import ThemeSelectorScreen
 
 
-def test_theme_registry_contains_dcoder_and_textual_builtins():
+def test_theme_registry_contains_opscode_and_textual_builtins():
     reload_registry()
     registry = get_registry()
 
-    assert "dcoder-dark" in registry
-    assert "dcoder-light" in registry
+    assert "opscode-dark" in registry
+    assert "opscode-light" in registry
     assert "langchain" in registry
     assert "langchain-light" in registry
-    assert registry["dcoder-dark"].label == "DevOps Dark"
-    assert registry["dcoder-light"].label == "DevOps Light"
+    assert registry["opscode-dark"].label == "DevOps Dark"
+    assert registry["opscode-light"].label == "DevOps Light"
     assert registry["langchain"].label == "LangChain Dark"
     assert registry["langchain-light"].label == "LangChain Light"
 
@@ -34,21 +34,21 @@ def test_theme_registry_contains_dcoder_and_textual_builtins():
 
 def test_save_and_load_theme_preference(tmp_path: Path):
     config_file = tmp_path / "config.toml"
-    with patch("dcoder.ui.theme.CONFIG_PATH", config_file):
+    with patch("opscode.ui.theme.CONFIG_PATH", config_file):
         assert save_theme_preference("nord")
         assert load_theme_preference() == "nord"
 
 
 def test_save_and_load_terminal_theme_mapping(tmp_path: Path):
     config_file = tmp_path / "config.toml"
-    with patch("dcoder.ui.theme.CONFIG_PATH", config_file), \
+    with patch("opscode.ui.theme.CONFIG_PATH", config_file), \
          patch.dict(os.environ, {"TERM_PROGRAM": "iTerm.app"}):
         assert save_terminal_theme_mapping("iTerm.app", "catppuccin-mocha")
         assert load_theme_preference() == "catppuccin-mocha"
 
 
 def test_theme_selector_screen_initialization():
-    screen = ThemeSelectorScreen(current_theme="dcoder-dark")
-    assert screen._current_theme == "dcoder-dark"
-    formatted = screen._format_option("dcoder-dark", "DevOps Dark")
+    screen = ThemeSelectorScreen(current_theme="opscode-dark")
+    assert screen._current_theme == "opscode-dark"
+    formatted = screen._format_option("opscode-dark", "DevOps Dark")
     assert "current" in formatted

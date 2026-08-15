@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import ToolMessage
 
-from dcoder.middleware.shell_allow_list import ShellAllowListMiddleware
+from opscode.middleware.shell_allow_list import ShellAllowListMiddleware
 
 
 class TestShellAllowListValidation:

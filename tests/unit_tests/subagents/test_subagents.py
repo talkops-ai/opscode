@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
-from dcoder.subagents.loader import _parse_subagent_file, list_subagents
-from dcoder.subagents import get_built_in_subagents
+from opscode.subagents.loader import _parse_subagent_file, list_subagents
+from opscode.subagents import get_built_in_subagents
 
 def test_parse_subagent_file(tmp_path):
     subagent_file = tmp_path / "AGENTS.md"
@@ -53,7 +53,7 @@ def test_built_in_subagents():
 
 
 def test_load_async_subagents(tmp_path):
-    from dcoder.subagents.loader import load_async_subagents
+    from opscode.subagents.loader import load_async_subagents
 
     config_file = tmp_path / "config.toml"
     config_file.write_text(
@@ -75,7 +75,7 @@ def test_load_async_subagents(tmp_path):
 
 
 def test_load_async_subagents_missing_fields(tmp_path, caplog):
-    from dcoder.subagents.loader import load_async_subagents
+    from opscode.subagents.loader import load_async_subagents
 
     config_file = tmp_path / "config.toml"
     config_file.write_text(
@@ -91,7 +91,7 @@ def test_load_async_subagents_missing_fields(tmp_path, caplog):
 
 
 def test_subagent_directory_stray_file_warning(tmp_path, caplog):
-    from dcoder.subagents.loader import list_subagents
+    from opscode.subagents.loader import list_subagents
 
     # Create a stray file directly in agents dir
     agents_dir = tmp_path / "agents"
@@ -105,7 +105,7 @@ def test_subagent_directory_stray_file_warning(tmp_path, caplog):
 
 
 def test_subagent_folder_missing_agents_md(tmp_path, caplog):
-    from dcoder.subagents.loader import list_subagents
+    from opscode.subagents.loader import list_subagents
 
     agents_dir = tmp_path / "agents"
     sub_dir = agents_dir / "my_subagent"
@@ -119,7 +119,7 @@ def test_subagent_folder_missing_agents_md(tmp_path, caplog):
 
 
 def test_subagent_invalid_frontmatter_fields(tmp_path, caplog):
-    from dcoder.subagents.loader import _parse_subagent_file
+    from opscode.subagents.loader import _parse_subagent_file
 
     file_path = tmp_path / "AGENTS.md"
     file_path.write_text(
@@ -137,7 +137,7 @@ def test_subagent_invalid_frontmatter_fields(tmp_path, caplog):
 
 
 def test_subagent_name_collision(tmp_path, caplog):
-    from dcoder.subagents.loader import list_subagents
+    from opscode.subagents.loader import list_subagents
 
     agents_dir = tmp_path / "agents"
     sub1 = agents_dir / "sub1"

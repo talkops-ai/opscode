@@ -1,0 +1,51 @@
+"""Re-export classifier-backed Auto mode components."""
+
+from __future__ import annotations
+
+from opscode.middleware.auto_mode_hitl import (
+    AUTO_MODE_COUNTERS_NAMESPACE,
+    AUTO_MODE_EVENT_TYPE,
+    USER_PROMPT_METADATA_KEY,
+    AsyncApprovalHITLMiddleware,
+    AutoDecision,
+    AutoDecisionBatch,
+    AutoDecisionCategory,
+    AutoModeCounters,
+    AutoModeHITLMiddleware,
+    AutoModeState,
+    AutoTempArtifact,
+    HeadlessMCPGuardMiddleware,
+    PlannedDecision,
+    PromptMetadata,
+    _async_routing_mode,
+    classifier_unavailable_reason,
+    gated_mcp_tool_names,
+    is_mcp_tool,
+    mcp_tool_is_coherently_read_only,
+    sanitize_auto_reason,
+    user_prompt_metadata,
+)
+
+__all__ = [
+    "AUTO_MODE_COUNTERS_NAMESPACE",
+    "AUTO_MODE_EVENT_TYPE",
+    "USER_PROMPT_METADATA_KEY",
+    "AsyncApprovalHITLMiddleware",
+    "AutoDecision",
+    "AutoDecisionBatch",
+    "AutoDecisionCategory",
+    "AutoModeCounters",
+    "AutoModeHITLMiddleware",
+    "AutoModeState",
+    "AutoTempArtifact",
+    "HeadlessMCPGuardMiddleware",
+    "PlannedDecision",
+    "PromptMetadata",
+    "_async_routing_mode",
+    "classifier_unavailable_reason",
+    "gated_mcp_tool_names",
+    "is_mcp_tool",
+    "mcp_tool_is_coherently_read_only",
+    "sanitize_auto_reason",
+    "user_prompt_metadata",
+]

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from dcoder.commands.core.model import ModelHandler
-from dcoder.state.session import SessionManager
+from opscode.commands.core.model import ModelHandler
+from opscode.state.session import SessionManager
 
 
 class TestConfigurableModel:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from dcoder.security.unicode_security import (
+from opscode.security.unicode_security import (
     CONFUSABLES,
     UnicodeIssue,
     UrlSafetyResult,

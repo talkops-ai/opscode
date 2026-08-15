@@ -4,10 +4,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dcoder.commands._base import BaseCommandHandler, CommandContext, CommandResult
-from dcoder.commands._router import CommandRouter
-from dcoder.commands._types import CommandCategory, SafetyLevel
-from dcoder.commands.core.help_cmd import HelpHandler
+from opscode.commands._base import BaseCommandHandler, CommandContext, CommandResult
+from opscode.commands._router import CommandRouter
+from opscode.commands._types import CommandCategory, SafetyLevel
+from opscode.commands.core.help_cmd import HelpHandler
 
 
 class SampleCoreCommand(BaseCommandHandler):

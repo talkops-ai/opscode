@@ -4,7 +4,7 @@ import pytest
 from textual.app import App
 from textual.widgets import OptionList
 
-from dcoder.ui.widgets.thread_selector import ThreadSelectorScreen
+from opscode.ui.widgets.thread_selector import ThreadSelectorScreen
 
 
 class DummyApp(App):

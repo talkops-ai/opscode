@@ -4,8 +4,8 @@ import os
 from unittest.mock import MagicMock, patch
 import pytest
 
-from dcoder.ui.widgets.auth import AuthPromptScreen, AuthResult, PROVIDER_DISPLAY_NAMES, PROVIDER_API_KEY_URLS, is_langsmith
-from dcoder.ui.widgets.auth_manager import AuthManagerScreen, _KNOWN_PROVIDERS
+from opscode.ui.widgets.auth import AuthPromptScreen, AuthResult, PROVIDER_DISPLAY_NAMES, PROVIDER_API_KEY_URLS, is_langsmith
+from opscode.ui.widgets.auth_manager import AuthManagerScreen, _KNOWN_PROVIDERS
 
 
 def test_langsmith_provider_metadata():

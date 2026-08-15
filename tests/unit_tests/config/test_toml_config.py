@@ -3,7 +3,7 @@ import tomllib
 from pathlib import Path
 import pytest
 
-from dcoder.config.toml_config import (
+from opscode.config.toml_config import (
     clear_default_agent,
     clear_default_model,
     clear_effort_for_model,
@@ -20,9 +20,9 @@ from dcoder.config.toml_config import (
     save_recent_model,
     save_theme_preference,
 )
-from dcoder.commands.core.model import ModelHandler
-from dcoder.commands.core.effort import EffortHandler
-from dcoder.commands._base import CommandContext
+from opscode.commands.core.model import ModelHandler
+from opscode.commands.core.effort import EffortHandler
+from opscode.commands._base import CommandContext
 
 
 @pytest.fixture
@@ -104,7 +104,7 @@ def test_theme_and_cross_table_preservation(test_config_path):
 @pytest.mark.asyncio
 async def test_model_and_effort_command_handlers(tmp_path, monkeypatch):
     test_config = tmp_path / "config.toml"
-    monkeypatch.setattr("dcoder.config.toml_config.CONFIG_PATH", test_config)
+    monkeypatch.setattr("opscode.config.toml_config.CONFIG_PATH", test_config)
 
     handler = ModelHandler()
     ctx = CommandContext(app=None, raw_command="/model --default google_genai:gemini-3.6-flash", args="--default google_genai:gemini-3.6-flash")

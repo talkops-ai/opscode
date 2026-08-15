@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from dcoder.middleware.auto_mode_hitl import (
+from opscode.middleware.auto_mode_hitl import (
     AutoDecision,
     AutoDecisionBatch,
     AutoDecisionCategory,

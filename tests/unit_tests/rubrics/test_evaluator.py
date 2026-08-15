@@ -2,7 +2,7 @@
 
 import pytest
 
-from dcoder.rubrics.evaluator import (
+from opscode.rubrics.evaluator import (
     _RUBRIC_GRADER_READ_FILE_PREFIX,
     _validate_rubric_grader_read_path,
 )

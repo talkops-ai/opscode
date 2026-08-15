@@ -3,8 +3,8 @@
 from unittest.mock import MagicMock
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands.core.skills import SkillsHandler
+from opscode.commands._base import CommandContext
+from opscode.commands.core.skills import SkillsHandler
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,7 @@ async def test_skills_handler_non_interactive_text():
             "name": "aws-ecs",
             "description": "AWS ECS management",
             "source": "user",
-            "path": "/Users/test/.dcoder/skills/aws-ecs/SKILL.md",
+            "path": "/Users/test/.opscode/skills/aws-ecs/SKILL.md",
         }
     ]
 
@@ -109,7 +109,7 @@ async def test_skills_handler_empty_state():
     res = await handler.execute(ctx)
     assert res.success
     assert res.message is not None and "No skills found" in res.message
-    assert res.message is not None and ".dcoder/skills/" in res.message
+    assert res.message is not None and ".opscode/skills/" in res.message
 
 
 @pytest.mark.asyncio

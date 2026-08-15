@@ -2,14 +2,14 @@
 
 import pytest
 from pathlib import Path
-from dcoder.ui.app import DCoderApp
-from dcoder.ui.widgets.status import StatusBar, ModelLabel, BranchLabel
-from dcoder.commands.power.goal import GoalState, GoalHandler
+from opscode.ui.app import OpsCodeApp
+from opscode.ui.widgets.status import StatusBar, ModelLabel, BranchLabel
+from opscode.commands.power.goal import GoalState, GoalHandler
 
 
 @pytest.mark.asyncio
 async def test_status_bar_approval_mode_badges():
-    app = DCoderApp(defer_server_start=True)
+    app = OpsCodeApp(defer_server_start=True)
     async with app.run_test() as pilot:
         sb = app.query_one(StatusBar)
 
@@ -32,7 +32,7 @@ async def test_status_bar_approval_mode_badges():
 
 @pytest.mark.asyncio
 async def test_status_bar_tokens_and_cost():
-    app = DCoderApp(defer_server_start=True)
+    app = OpsCodeApp(defer_server_start=True)
     async with app.run_test() as pilot:
         sb = app.query_one(StatusBar)
 
@@ -49,7 +49,7 @@ async def test_status_bar_tokens_and_cost():
 
 @pytest.mark.asyncio
 async def test_status_bar_model_label_and_effort():
-    app = DCoderApp(defer_server_start=True)
+    app = OpsCodeApp(defer_server_start=True)
     async with app.run_test() as pilot:
         sb = app.query_one(StatusBar)
 
@@ -64,7 +64,7 @@ async def test_status_bar_model_label_and_effort():
 
 @pytest.mark.asyncio
 async def test_status_bar_rubric_label_sync():
-    app = DCoderApp(defer_server_start=True)
+    app = OpsCodeApp(defer_server_start=True)
     async with app.run_test() as pilot:
         sb = app.query_one(StatusBar)
         state = GoalState()
@@ -93,7 +93,7 @@ async def test_status_bar_rubric_label_sync():
 async def test_status_bar_cwd_and_branch():
     home = Path.home()
     test_path = home / "Documents" / "work" / "talkops" / "terraform-example-modules"
-    app = DCoderApp(defer_server_start=True)
+    app = OpsCodeApp(defer_server_start=True)
 
     async with app.run_test() as pilot:
         sb = app.query_one(StatusBar)
@@ -109,7 +109,7 @@ async def test_status_bar_cwd_and_branch():
 
 @pytest.mark.asyncio
 async def test_reset_thread_usage():
-    app = DCoderApp(defer_server_start=True)
+    app = OpsCodeApp(defer_server_start=True)
     async with app.run_test() as pilot:
         sb = app.query_one(StatusBar)
         sb.set_tokens(19000)
@@ -128,7 +128,7 @@ async def test_reset_thread_usage():
 
 
 def test_default_effort_for_reasoning_models():
-    from dcoder.model.reasoning import default_effort_for_model
+    from opscode.model.reasoning import default_effort_for_model
 
     assert default_effort_for_model("google_genai:gemini-3.6-flash") == "medium"
     assert default_effort_for_model("openai:gpt-4o") is None

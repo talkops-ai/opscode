@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from dcoder.subagents.subagents_parser import parse_built_in_subagents, parse_subagent_bundle
+from opscode.subagents.subagents_parser import parse_built_in_subagents, parse_subagent_bundle
 
 def test_parse_built_in_subagents():
     built_ins = parse_built_in_subagents()

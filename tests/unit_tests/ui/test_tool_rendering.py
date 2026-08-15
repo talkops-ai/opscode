@@ -8,15 +8,15 @@ from unittest.mock import MagicMock
 import pytest
 from textual.app import App, ComposeResult
 
-from dcoder.ui.widgets.messages import (
+from opscode.ui.widgets.messages import (
     _COLLAPSE_OUTPUT_BY_DEFAULT,
     MessageList,
     ToolCallMessage,
     ToolGroupSummary,
     summarize_tool_group,
 )
-from dcoder.ui.theme import get_css_variable_defaults, get_theme_colors, register_app_themes
-from dcoder.ui.widgets.tool_display import format_tool_result_summary
+from opscode.ui.theme import get_css_variable_defaults, get_theme_colors, register_app_themes
+from opscode.ui.widgets.tool_display import format_tool_result_summary
 
 
 def test_collapse_output_by_default_contains_new_tools():
@@ -68,7 +68,7 @@ def test_summarize_multi_tool_group_phrasing():
 class _TestMessageApp(App[None]):
     def on_mount(self) -> None:
         register_app_themes(self)
-        self.theme = "dcoder-dark"
+        self.theme = "opscode-dark"
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         colors = get_theme_colors(self)

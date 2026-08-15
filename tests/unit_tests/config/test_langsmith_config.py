@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from dcoder.config.langsmith import (
+from opscode.config.langsmith import (
     LangSmithApiError,
     LangSmithImportError,
     LangSmithLookupTimeoutError,
@@ -23,7 +23,7 @@ class TestAssembleLangsmithThreadUrl:
             "https://smith.langchain.com/o/org/projects/p/abc123",
             "thread-42",
         )
-        assert url.endswith("/t/thread-42?utm_source=dcoder")
+        assert url.endswith("/t/thread-42?utm_source=opscode")
 
     def test_strips_trailing_slash(self):
         url = _assemble_langsmith_thread_url(
@@ -35,7 +35,7 @@ class TestAssembleLangsmithThreadUrl:
 
     def test_utm_source_present(self):
         url = _assemble_langsmith_thread_url("https://example.com/p", "t1")
-        assert "utm_source=dcoder" in url
+        assert "utm_source=opscode" in url
 
 
 class TestGetLangsmithProjectName:
@@ -63,7 +63,7 @@ class TestGetLangsmithProjectName:
             clear=True,
         ):
             result = get_langsmith_project_name()
-            assert result == "dcoder"
+            assert result == "opscode"
 
     def test_respects_custom_project_env_var(self):
         with patch.dict(
@@ -71,18 +71,18 @@ class TestGetLangsmithProjectName:
             {
                 "LANGSMITH_API_KEY": "lsk-test123",
                 "LANGSMITH_TRACING": "true",
-                "DCODER_LANGSMITH_PROJECT": "my-custom-project",
+                "OPSCODE_LANGSMITH_PROJECT": "my-custom-project",
             },
             clear=True,
         ):
             result = get_langsmith_project_name()
             assert result == "my-custom-project"
 
-    def test_dcoder_prefix_takes_precedence(self):
+    def test_opscode_prefix_takes_precedence(self):
         with patch.dict(
             os.environ,
             {
-                "DCODER_LANGSMITH_API_KEY": "lsk-dcoder",
+                "OPSCODE_LANGSMITH_API_KEY": "lsk-opscode",
                 "LANGSMITH_API_KEY": "lsk-other",
                 "LANGSMITH_TRACING": "true",
             },
@@ -102,7 +102,7 @@ class TestGetLangsmithProjectName:
             clear=True,
         ):
             result = get_langsmith_project_name()
-            assert result == "dcoder"
+            assert result == "opscode"
 
 
 class TestExceptionHierarchy:

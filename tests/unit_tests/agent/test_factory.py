@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock, MagicMock
 
-from dcoder.agent.factory import (
+from opscode.agent.factory import (
     CLIContextSchema,
     _interrupt_predicate,
     _should_interrupt_tool_call,
@@ -110,7 +110,7 @@ class TestResolvePtcOption:
             _resolve_ptc_option(["execute"], tools=[], acknowledge_unsafe=False, auto_approve=False)
 
     def test_resolve_ptc_blocks_task_without_ack(self):
-        from dcoder.agent.factory import _INTERPRETER_WRITE_TOOLS
+        from opscode.agent.factory import _INTERPRETER_WRITE_TOOLS
         assert "task" in _INTERPRETER_WRITE_TOOLS
         assert "start_async_task" in _INTERPRETER_WRITE_TOOLS
         assert "update_async_task" in _INTERPRETER_WRITE_TOOLS
@@ -121,7 +121,7 @@ class TestResolvePtcOption:
 
 
 def test_format_task_description_formatting():
-    from dcoder.agent.factory import _format_description
+    from opscode.agent.factory import _format_description
 
     tool_call = {
         "name": "task",
@@ -139,7 +139,7 @@ def test_format_task_description_formatting():
 
 
 def test_format_task_description_truncation():
-    from dcoder.agent.factory import _format_description
+    from opscode.agent.factory import _format_description
 
     long_instructions = "x" * 600
     tool_call = {

@@ -1,4 +1,4 @@
-"""Tests for the dcoder.integrations package (hooks, event_bus, notifications)."""
+"""Tests for the opscode.integrations package (hooks, event_bus, notifications)."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from dcoder.integrations.hooks import (
+from opscode.integrations.hooks import (
     HOOK_TOOL_OUTPUT_LIMIT,
     HookConfig,
     _sanitise_payload,
     dispatch_hook,
     load_hooks,
 )
-from dcoder.integrations.event_bus import EventBus, ExternalEvent, _VALID_KINDS
+from opscode.integrations.event_bus import EventBus, ExternalEvent, _VALID_KINDS
 
 
 # ── Hooks ────────────────────────────────────────────────
@@ -238,9 +238,9 @@ async def test_event_bus_rejects_invalid_json(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_notify_session_start():
     """notify_session_start should dispatch session.start event."""
-    from dcoder.integrations.notifications import notify_session_start
+    from opscode.integrations.notifications import notify_session_start
 
-    with patch("dcoder.integrations.notifications.dispatch_hook", new_callable=AsyncMock) as mock:
+    with patch("opscode.integrations.notifications.dispatch_hook", new_callable=AsyncMock) as mock:
         await notify_session_start("sess-1", "gpt-4o")
         mock.assert_called_once_with(
             "session.start",
@@ -251,9 +251,9 @@ async def test_notify_session_start():
 @pytest.mark.asyncio
 async def test_notify_task_complete():
     """notify_task_complete should dispatch task.complete event."""
-    from dcoder.integrations.notifications import notify_task_complete
+    from opscode.integrations.notifications import notify_task_complete
 
-    with patch("dcoder.integrations.notifications.dispatch_hook", new_callable=AsyncMock) as mock:
+    with patch("opscode.integrations.notifications.dispatch_hook", new_callable=AsyncMock) as mock:
         await notify_task_complete("Deployment finished")
         mock.assert_called_once_with(
             "task.complete",

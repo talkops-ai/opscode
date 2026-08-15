@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from dcoder.memory.branch import BranchMemoryStore, list_branch_memories
+from opscode.memory.branch import BranchMemoryStore, list_branch_memories
 
 
 def test_branch_memory_store(tmp_path):

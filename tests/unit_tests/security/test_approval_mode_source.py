@@ -9,13 +9,13 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
 
-from dcoder.agent.factory import (
+from opscode.agent.factory import (
     CLIContextSchema,
     _interrupt_predicate,
     _should_interrupt_tool_call,
 )
-from dcoder.approval_mode import ApprovalMode, approval_mode_key
-from dcoder.security.approval_mode_source import (
+from opscode.approval_mode import ApprovalMode, approval_mode_key
+from opscode.security.approval_mode_source import (
     _DecidedMode,
     _LiveLookup,
     _approval_mode_source,

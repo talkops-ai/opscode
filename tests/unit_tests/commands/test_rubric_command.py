@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from dcoder.commands.power.goal import get_goal_state
-from dcoder.commands.power.rubric import RubricHandler
+from opscode.commands.power.goal import get_goal_state
+from opscode.commands.power.rubric import RubricHandler
 
 
 class TestRubricCommand:

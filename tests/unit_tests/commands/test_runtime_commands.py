@@ -3,16 +3,16 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands._types import BypassTier, CommandCategory, SafetyLevel
-from dcoder.commands.power.runtime import (
+from opscode.commands._base import CommandContext
+from opscode.commands._types import BypassTier, CommandCategory, SafetyLevel
+from opscode.commands.power.runtime import (
     AutoUpdateHandler,
     InstallHandler,
     ReloadHandler,
     RestartHandler,
     UpdateHandler,
 )
-from dcoder.ui.command_registry import get_command
+from opscode.ui.command_registry import get_command
 
 
 # ── ReloadHandler Tests ──────────────────────────────────
@@ -47,7 +47,7 @@ async def test_reload_handler_fallback():
     ctx = CommandContext(app=None, settings=settings, raw_command="/reload")
 
     handler = ReloadHandler()
-    with patch("dcoder.commands.power.runtime._reload_dotenv"):
+    with patch("opscode.commands.power.runtime._reload_dotenv"):
         res = await handler.execute(ctx)
     assert res.success
     assert res.mount_as_app_message
@@ -172,8 +172,8 @@ async def test_update_handler_fallback():
     ctx = CommandContext(app=None, raw_command="/update", args="")
     handler = UpdateHandler()
 
-    with patch("dcoder.commands.power.runtime._check_pypi_version", return_value="1.0.0"):
-        with patch("dcoder.__version__", "1.0.0", create=True):
+    with patch("opscode.commands.power.runtime._check_pypi_version", return_value="1.0.0"):
+        with patch("opscode.__version__", "1.0.0", create=True):
             res = await handler.execute(ctx)
             assert res.success
             assert res.message is not None and "latest version" in res.message.lower()

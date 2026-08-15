@@ -5,9 +5,9 @@ import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.messages import SystemMessage
 
-from dcoder.middleware.subagents import SubagentsMiddleware
-from dcoder.middleware.unified_system_message import UnifiedSystemMessageMiddleware
-from dcoder.subagents.types import SubagentMetadata
+from opscode.middleware.subagents import SubagentsMiddleware
+from opscode.middleware.unified_system_message import UnifiedSystemMessageMiddleware
+from opscode.subagents.types import SubagentMetadata
 
 
 def test_subagent_prompt_dynamic_bifurcation() -> None:

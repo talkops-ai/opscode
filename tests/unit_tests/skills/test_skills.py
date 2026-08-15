@@ -1,8 +1,8 @@
 import pytest
 from pathlib import Path
-from dcoder.skills.registry import SkillRegistry
-from dcoder.skills.trust import SkillTrustStore
-from dcoder.skills.loader import load_skill_content
+from opscode.skills.registry import SkillRegistry
+from opscode.skills.trust import SkillTrustStore
+from opscode.skills.loader import load_skill_content
 
 def test_skills_registry_singleton():
     reg1 = SkillRegistry.get_instance()
@@ -27,7 +27,7 @@ def test_skills_trust_store(tmp_path):
 
 def test_skills_auto_trust():
     store = SkillTrustStore()
-    built_in = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "built_in_skills"
+    built_in = Path(__file__).parent.parent.parent.parent / "src" / "opscode" / "built_in_skills"
     assert store.is_trusted("dummy", built_in)
 
 def test_load_skill_content_traversal_prevention(tmp_path):

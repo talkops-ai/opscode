@@ -2,8 +2,8 @@
 
 import pytest
 
-from dcoder.commands._types import BypassTier, CommandCategory, SafetyLevel
-from dcoder.ui.command_registry import BypassTier as RegistryBypassTier
+from opscode.commands._types import BypassTier, CommandCategory, SafetyLevel
+from opscode.ui.command_registry import BypassTier as RegistryBypassTier
 
 
 def test_safety_level_values():

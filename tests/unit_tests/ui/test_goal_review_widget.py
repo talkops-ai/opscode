@@ -2,7 +2,7 @@
 
 import asyncio
 import pytest
-from dcoder.ui.widgets.goal_review import (
+from opscode.ui.widgets.goal_review import (
     GoalReviewMenu,
     GoalReviewAccepted,
     GoalReviewEdited,
@@ -111,7 +111,7 @@ async def test_goal_review_menu_cancel():
 @pytest.mark.asyncio
 async def test_inline_prompt_text_area_newline_shortcuts():
     """Test multi-line newline insertion via shift+enter, ctrl+j, and backslash-enter."""
-    from dcoder.ui.widgets._inline_prompt import InlinePromptTextArea
+    from opscode.ui.widgets._inline_prompt import InlinePromptTextArea
     from textual.events import Key
 
     text_area = InlinePromptTextArea()
@@ -142,7 +142,7 @@ async def test_inline_prompt_text_area_newline_shortcuts():
 @pytest.mark.asyncio
 async def test_goal_review_text_area_option_return_macos():
     """Test macOS Option+Return escape sequence handling in GoalReviewTextArea."""
-    from dcoder.ui.widgets.goal_review import GoalReviewTextArea
+    from opscode.ui.widgets.goal_review import GoalReviewTextArea
     from textual.events import Key
     import time
 
@@ -189,7 +189,7 @@ async def test_goal_review_menu_cancel_cooloff():
 async def test_textual_patch_xterm_parser_alt_enter():
     """Test that XTermParser patch preserves alt modifier on ESC + Return sequence."""
     from textual._xterm_parser import XTermParser
-    import dcoder._textual_patches  # noqa: F401
+    import opscode._textual_patches  # noqa: F401
 
     parser = XTermParser()
     events = list(parser._sequence_to_key_events("\x1b\r"))
@@ -200,7 +200,7 @@ async def test_textual_patch_xterm_parser_alt_enter():
 @pytest.mark.asyncio
 async def test_goal_review_text_area_standalone_escape_flushes():
     """Test that standalone Escape key in GoalReviewTextArea clears pending state on flush."""
-    from dcoder.ui.widgets.goal_review import GoalReviewTextArea
+    from opscode.ui.widgets.goal_review import GoalReviewTextArea
     from textual.events import Key
 
     editor = GoalReviewTextArea()
@@ -216,10 +216,10 @@ async def test_goal_review_text_area_standalone_escape_flushes():
 @pytest.mark.asyncio
 async def test_app_focus_restoration_on_rubric_evaluation_end(monkeypatch):
     """Test that _handle_rubric_evaluation_end updates state status and triggers focus restoration."""
-    from dcoder.ui.app import DCoderApp
-    from dcoder.commands.power.goal import get_goal_state
+    from opscode.ui.app import OpsCodeApp
+    from opscode.commands.power.goal import get_goal_state
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     state = get_goal_state(app)
     state.objective = "Test objective"
 
@@ -239,10 +239,10 @@ async def test_app_focus_restoration_on_rubric_evaluation_end(monkeypatch):
 @pytest.mark.asyncio
 async def test_app_focus_restoration_on_adhoc_rubric_evaluation_end(monkeypatch):
     """Test that _handle_rubric_evaluation_end clears next_rubric and triggers focus restoration even without a goal objective."""
-    from dcoder.ui.app import DCoderApp
-    from dcoder.commands.power.goal import get_goal_state
+    from opscode.ui.app import OpsCodeApp
+    from opscode.commands.power.goal import get_goal_state
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     state = get_goal_state(app)
     state.objective = None
     state.next_rubric = "One turn criteria"

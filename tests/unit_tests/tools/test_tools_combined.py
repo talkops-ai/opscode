@@ -3,13 +3,8 @@ from unittest.mock import MagicMock, patch
 from langchain.tools import ToolRuntime
 import shlex
 
-from dcoder.tools.fetch_url import fetch_url
-from dcoder.security.url_validation import _is_blocked_ip
-from dcoder.tools.devops.terraform import create_terraform_validate_tool, create_terraform_plan_tool
-from dcoder.tools.devops.helm import create_helm_lint_tool
-from dcoder.tools.devops.kubectl import create_kubectl_get_tool
-from dcoder.tools.devops.ansible import create_ansible_check_tool
-from dcoder.tools.devops.argocd import create_argocd_diff_tool
+from opscode.tools.fetch_url import fetch_url
+from opscode.security.url_validation import _is_blocked_ip
 import ipaddress
 
 def test_ssrf_blocked_ips():

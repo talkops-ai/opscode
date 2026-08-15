@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands.core.clear import ClearHandler, ForceClearHandler
+from opscode.commands._base import CommandContext
+from opscode.commands.core.clear import ClearHandler, ForceClearHandler
 
 
 @pytest.mark.asyncio

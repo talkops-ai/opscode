@@ -6,22 +6,22 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, AsyncMock, PropertyMock
 from datetime import datetime
 
-from dcoder.mcp.discovery import MCPDiscovery
-from dcoder.mcp.session_manager import MCPSessionManager
-from dcoder.mcp.trust import (
+from opscode.mcp.discovery import MCPDiscovery
+from opscode.mcp.session_manager import MCPSessionManager
+from opscode.mcp.trust import (
     is_project_mcp_trusted,
     trust_project_mcp,
     revoke_project_mcp_trust,
     compute_config_fingerprint,
 )
-from dcoder.backend.sandbox.config import SandboxConfig
-from dcoder.backend.sandbox.registry import SandboxRegistry
-from dcoder.backend.sandbox.factory import create_sandbox
-from dcoder.security.unicode_security import check_url_safety, sanitize_control_chars
-from dcoder.security.shell_safety import is_shell_command_allowed
-from dcoder.security.approval_mode import approval_mode_key, approval_mode_payload
-from dcoder.state.session import SessionManager
-from dcoder.middleware.resume_state import ResumeStateMiddleware
+from opscode.backend.sandbox.config import SandboxConfig
+from opscode.backend.sandbox.registry import SandboxRegistry
+from opscode.backend.sandbox.factory import create_sandbox
+from opscode.security.unicode_security import check_url_safety, sanitize_control_chars
+from opscode.security.shell_safety import is_shell_command_allowed
+from opscode.security.approval_mode import approval_mode_key, approval_mode_payload
+from opscode.state.session import SessionManager
+from opscode.middleware.resume_state import ResumeStateMiddleware
 from langchain_core.messages import AIMessage
 
 
@@ -45,9 +45,9 @@ def test_mcp_discovery_precedence(tmp_path):
     (user_dir / "mcp.json").write_text(json.dumps(user_cfg))
     (project_dir / ".mcp.json").write_text(json.dumps(project_cfg))
 
-    with patch("dcoder.config.paths.AGENTS_SHARED_DIR", global_dir.parent / ".agents"), \
-         patch("dcoder.config.paths.DATA_DIR", user_dir), \
-         patch("dcoder.config.paths.GLOBAL_MCP_PATH", user_dir / ".mcp.json"):
+    with patch("opscode.config.paths.AGENTS_SHARED_DIR", global_dir.parent / ".agents"), \
+         patch("opscode.config.paths.DATA_DIR", user_dir), \
+         patch("opscode.config.paths.GLOBAL_MCP_PATH", user_dir / ".mcp.json"):
         discovery = MCPDiscovery()
         merged = discovery.discover(project_root=project_dir)
         servers = merged
@@ -65,7 +65,7 @@ def test_mcp_trust_store(tmp_path):
     cfg_file.write_text(json.dumps({"mcpServers": {}}))
     fingerprint = compute_config_fingerprint([cfg_file])
 
-    with patch("dcoder.mcp.trust._default_store_path", return_value=trust_file):
+    with patch("opscode.mcp.trust._default_store_path", return_value=trust_file):
         assert not is_project_mcp_trusted("/some/project/root", fingerprint)
         trust_project_mcp("/some/project/root", fingerprint)
         assert is_project_mcp_trusted("/some/project/root", fingerprint)
@@ -104,7 +104,7 @@ def test_resume_state_middleware():
     
     from langchain_core.messages.ai import UsageMetadata
     from typing import cast
-    from dcoder.middleware.resume_state import ResumeState
+    from opscode.middleware.resume_state import ResumeState
     
     # AI Message with usage metadata
     msg = AIMessage(
@@ -118,11 +118,11 @@ def test_resume_state_middleware():
 
 
 @pytest.mark.asyncio
-async def test_dcoder_app_request_approval_shell_allow_list(monkeypatch):
+async def test_opscode_app_request_approval_shell_allow_list(monkeypatch):
     """Verify that shell commands on the allow-list are auto-approved without prompting."""
-    from dcoder.ui.app import DCoderApp
+    from opscode.ui.app import OpsCodeApp
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     app._shell_allow_list = ["terraform plan", "git status"]
 
     mounted = []
@@ -145,11 +145,11 @@ async def test_dcoder_app_request_approval_shell_allow_list(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dcoder_app_request_approval_spinner_and_subagent_pause_lifecycle(monkeypatch):
+async def test_opscode_app_request_approval_spinner_and_subagent_pause_lifecycle(monkeypatch):
     """Verify loading spinner and subagent panel are paused during approval and resumed after decision."""
-    from dcoder.ui.app import DCoderApp
+    from opscode.ui.app import OpsCodeApp
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     pause_called = []
     resume_called = []
 
@@ -184,13 +184,13 @@ async def test_dcoder_app_request_approval_spinner_and_subagent_pause_lifecycle(
 
 
 @pytest.mark.asyncio
-async def test_dcoder_app_on_approval_menu_decided_auto_mode_switch(monkeypatch):
+async def test_opscode_app_on_approval_menu_decided_auto_mode_switch(monkeypatch):
     """Verify that auto_approve_all decision switches approval mode to AUTO."""
-    from dcoder.ui.app import DCoderApp
-    from dcoder.approval_mode import ApprovalMode
-    from dcoder.ui.widgets.approval import ApprovalMenu
+    from opscode.ui.app import OpsCodeApp
+    from opscode.approval_mode import ApprovalMode
+    from opscode.ui.widgets.approval import ApprovalMenu
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     mode_set = None
 
     async def mock_set_approval_mode(mode):

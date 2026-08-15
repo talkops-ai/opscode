@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands.power.version import VersionHandler
+from opscode.commands._base import CommandContext
+from opscode.commands.power.version import VersionHandler
 
 
 @pytest.mark.asyncio
@@ -19,7 +19,7 @@ async def test_version_handler_output():
 
     res = await handler.execute(ctx)
     assert res.success is True
-    assert res.message is not None and res.message is not None and "dcoder-code version:" in res.message
+    assert res.message is not None and res.message is not None and "opscode-code version:" in res.message
     assert res.message is not None and res.message is not None and "Python version:" in res.message
     assert res.message is not None and "claude-3-5-sonnet" in res.message
 

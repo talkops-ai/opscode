@@ -28,7 +28,7 @@ scenarios:
     expected:
       command: "version"
       success: true
-      contains: ["dcoder"]
+      contains: ["opscode"]
 
   # ── Power commands ─────────────────
   - name: goal_show_no_goal
