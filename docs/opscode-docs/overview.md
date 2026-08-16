@@ -9,11 +9,8 @@ Unlike general-purpose coding agents, OpsCode ships with first-class support for
 ## Quick install
 
 ```bash
-# Install with pip
-pip install opscode
-
-# Or install with uv
-uv pip install opscode
+# Standalone installation
+curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.0/scripts/install.sh | bash
 
 # Launch OpsCode interactive TUI (or use short alias 'ops')
 opscode

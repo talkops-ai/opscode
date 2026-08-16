@@ -226,13 +226,7 @@ jobs:
 
           \`\`\`bash
           # Direct one-line installer
-          curl -LsSf https://raw.githubusercontent.com/talkops-ai/dcoder/main/scripts/install.sh | bash
-
-          # Or install via uv (recommended)
-          uv tool install ${PYPI_NAME}==${VERSION}
-
-          # Or install via pip
-          pip install ${PYPI_NAME}==${VERSION}
+          curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v${VERSION}/scripts/install.sh | bash
           \`\`\`
 
           ---

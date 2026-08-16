@@ -50,17 +50,10 @@
 
 ### 1. Install
 
-Install OpsCode using `uv` (recommended) or `pip`:
+Install OpsCode directly into your environment:
 
 ```bash
-# Using uv (fastest)
-uv pip install talkops-opscode
-
-# Using pip
-pip install talkops-opscode
-
-# Or run direct standalone installer
-curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/main/scripts/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.0/scripts/install.sh | bash
 ```
 
 > [!NOTE]

@@ -9,11 +9,8 @@ OpsCode is a terminal coding and orchestration agent specialized for DevOps, Pla
 ### 1. Install and launch
 
 ```bash
-# Using pip
-pip install opscode
-
-# Or using uv
-uv pip install opscode
+# Standalone installation
+curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.0/scripts/install.sh | bash
 ```
 
 Launch an interactive session using the primary binary or short alias:
