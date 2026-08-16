@@ -60,6 +60,17 @@ test-integration = [
     "langsmith>=0.10.6",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
+    "pytest-cov>=5.0",
+    "agentevals>=0.0.8",
+    "langsmith>=0.10.6",
+]
+
 [project.scripts]
 opscode = "opscode.cli.main:cli_main"
 ops = "opscode.cli.main:cli_main"
