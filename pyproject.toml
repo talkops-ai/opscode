@@ -1,5 +1,5 @@
 [project]
-name = "opscode"
+name = "talkops-opscode"
 version = "0.1.0"
 description = "Autonomous CLI-first AI agent for DevOps, SRE, Platform Engineering, and Infrastructure as Code"
 readme = "README.md"

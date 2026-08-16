@@ -1,0 +1,152 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# OpsCode — Continuous Integration (CI) Pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs on: Pull Requests & pushes to main
+# Validates: Unit tests, Python 3.12/3.13 matrix, build integrity & wheel assets
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: "🔍 CI"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/ci.yml"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Step 1: Code Quality & Installer Shell Syntax ──────────────────────────
+  lint:
+    name: "🧹 Lint & Shell Check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate install script shell syntax
+        run: |
+          echo "Checking scripts/install.sh syntax..."
+          bash -n scripts/install.sh
+          echo "✅ Shell script syntax valid"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Type checking (pyright)
+        run: |
+          if uv run pyright --version 2>/dev/null; then
+            uv run pyright src/
+          else
+            echo "⚠️ pyright not installed in dev dependencies — skipping"
+          fi
+        continue-on-error: true
+
+  # ── Step 2: Test Matrix (Python 3.12 & 3.13) ────────────────────────────────
+  test:
+    name: "🧪 Tests (Python ${{ matrix.python-version }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run unit test suite
+        run: |
+          uv run pytest tests/ -m unit -v --tb=short
+
+  # ── Step 3: Build & Package Asset Verification ─────────────────────────────
+  build-verify:
+    name: "📦 Build & Wheel Verification"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          uv build
+          echo "📦 Build artifacts created:"
+          ls -lh dist/
+
+      - name: Verify embedded skills and subagents inside wheel
+        run: |
+          WHEEL=$(ls dist/*.whl | head -1)
+          echo "Inspecting wheel: $WHEEL"
+
+          # 1. Verify 4 Root Global Skills
+          for skill in cloud-core docker kubernetes remember; do
+            if ! unzip -l "$WHEEL" | grep -q "opscode/built_in_skills/${skill}/SKILL.md"; then
+              echo "❌ Critical Error: Missing root skill '${skill}' in wheel!"
+              exit 1
+            fi
+          done
+          echo "✅ All 4 root global skills verified in wheel."
+
+          # 2. Verify 6 Built-in Enterprise Subagents
+          for subagent in aws-opentofu-provisioner aws-terraform-module-writer ci-jenkins-automater github-actions-writer infra-ansible-provisioner k8s-helm-provisioner; do
+            if ! unzip -l "$WHEEL" | grep -q "opscode/built_in_subagents/${subagent}/agents/"; then
+              echo "❌ Critical Error: Missing subagent '${subagent}' in wheel!"
+              exit 1
+            fi
+          done
+          echo "✅ All 6 built-in enterprise subagents verified in wheel."
+
+          # 3. Verify Embedded .mcp.json files
+          for mcp_subagent in aws-opentofu-provisioner aws-terraform-module-writer infra-ansible-provisioner; do
+            if ! unzip -l "$WHEEL" | grep -q "opscode/built_in_subagents/${mcp_subagent}/.mcp.json"; then
+              echo "❌ Critical Error: Missing embedded .mcp.json for '${mcp_subagent}' in wheel!"
+              exit 1
+            fi
+          done
+          echo "✅ Embedded MCP manifests verified in wheel."
