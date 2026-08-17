@@ -1,138 +1,142 @@
-# Approval Modes & Security Controls
+# Approval modes
 
-> Control how OpsCode handles tool-execution approvals: Manual, Auto, and YOLO modes, alongside multi-layer security guardrails.
+> Choose how OpsCode reviews tool calls with Manual, Auto, and YOLO modes
 
-OpsCode provides three operational approval modes that govern whether the agent can execute tools (shell commands, file writes, infrastructure modifications) without human review.
+By default, OpsCode asks for your approval before running anything that could change your environment. These are called **gated actions** and include:
 
-## Approval Modes
+* Editing or deleting files
+* Running shell commands
+* Making web requests
+* Delegating work to subagents
 
-| Mode | Description | CLI Flag |
+Read-only tools like `ls`, `read_file`, `glob`, and `grep` always run without prompting. Approval modes let you choose how much oversight each session requires for everything else.
+
+## Choose a mode
+
+| Mode | What it does | CLI flag |
 |---|---|---|
-| **Manual** | Every mutating tool call requires explicit interactive approval | *(default)* |
-| **Auto** | Classifier-backed approval for safe operations; mutating or risky actions prompt for review | `-y`, `--auto-approve` |
-| **YOLO** | All gated actions execute without review (after acknowledging risk) | `--yolo` |
+| **Manual** (default) | Asks for approval before every gated action | *(none)* |
+| **Auto** | Auto-approves safe, read-only operations; asks for anything mutating or uncertain | `-y`, `--auto-approve` |
+| **YOLO** | Runs everything without review | `--yolo` |
 
-### Manual mode (default)
+Toggle between Manual and Auto at any time during a session with `Shift+Tab`. YOLO cannot be entered through the keyboard toggle.
 
-Every mutating tool execution pauses turn streaming and presents an interactive modal:
+:::warning
+Auto is a safety heuristic for a local coding agent. It is **not** sandbox containment or an operating-system boundary.
+:::
+
+## Manual mode
+
+Every mutating tool call pauses the conversation and shows an interactive prompt:
 
 ```
 [Approve]  [Reject]  [Edit Command]  [Always Allow]
 ```
 
-You inspect the exact shell command or file diff before it touches your environment. This is the recommended mode for production infrastructure where unintended commands (`terraform destroy`, `kubectl delete`) carry severe consequences.
+You inspect the exact shell command or file diff before it touches your environment. This is the recommended mode for production infrastructure where unintended commands carry severe consequences.
 
-### Auto mode
+## Auto mode
 
-Powered by `AutoModeHITLMiddleware` and command safety classification (`security/shell_safety.py`), Auto mode auto-approves safe, read-only operations (such as `ls`, `grep`, `cat`, `kubectl get`, `terraform validate`, file reads) while interrupting for mutating actions (`terraform apply`, `rm`, `kubectl delete`, file edits).
+Auto mode uses a classifier to decide which commands are safe. Read-only operations like `ls`, `grep`, `cat`, `kubectl get`, `terraform validate`, and file reads run automatically. Mutating actions like `terraform apply`, `rm`, `kubectl delete`, and file edits stop and ask.
 
-Enable at launch:
+Launch with Auto mode:
 
 ```bash
-opscode -y
-# or:
 ops -y
 ```
 
-### YOLO mode
+Or set it as your default in `~/.opscode/config.toml`:
 
-All gated actions execute without interruption. On first activation, OpsCode presents a safety acknowledgement prompt explaining the risks.
+```toml
+[startup]
+mode = "auto"
+```
+
+## YOLO mode
+
+All gated actions run without interruption. On first activation, OpsCode presents a safety acknowledgement explaining the risks.
 
 ```bash
-opscode --yolo
+ops --yolo
 ```
 
 :::warning
-YOLO mode is not recommended for production environments. The agent could execute destructive commands without manual verification.
+YOLO mode is not recommended for production environments. The agent can execute destructive commands without manual verification.
 :::
 
-## Switching modes at runtime
+## Switch modes at runtime
 
 Press **Shift+Tab** in an interactive session to cycle through available modes:
 
 ```
-Manual ───────────────> Auto ───────────────> YOLO ───────────────> Manual
+Manual → Auto → YOLO → Manual
 ```
 
 The cycle respects your session configuration:
 - Auto is skipped if the classifier is not eligible for the current environment.
-- YOLO is skipped if the YOLO switcher is disabled in config (`[startup].yolo_switcher = false`).
+- YOLO is skipped if you've disabled the YOLO switcher in config (`[startup].yolo_switcher = false`).
 
 ## Per-thread persistence
 
-Approval mode is persisted per conversation thread in SQLite (`~/.opscode/.state/sessions.db`). When you resume a thread with `opscode -r`, it automatically restores the exact approval mode that was active when the thread was last saved.
+Your approval mode is saved per conversation thread. When you resume a thread with `ops -r`, OpsCode restores the exact approval mode that was active when the thread was last used.
 
-## Shell safety & command allowlisting
+## Shell allowlists
 
-OpsCode includes a dedicated shell safety classifier in `security/shell_safety.py` that analyzes commands regardless of approval mode:
-
-- **Safe**: Read-only inspection commands (`ls`, `cat`, `grep`, `git status`, `kubectl get`, `terraform validate`, `tofu plan`)
-- **Unsafe**: Mutating or privileged commands (`rm`, `chmod`, `terraform apply`, `kubectl delete`, `tofu apply`)
-
-### Shell allow lists
-
-Pre-approve specific commands so they bypass interactive prompts:
+You can pre-approve specific commands so they bypass interactive prompts regardless of approval mode:
 
 ```bash
-# Via CLI flag with specific commands
-opscode -S "terraform,tofu,kubectl,helm"
+# Allow specific commands
+ops -S "terraform,tofu,kubectl,helm"
 
 # Use the curated recommended set
-opscode -S recommended
+ops -S recommended
 
-# Allow all shell commands without approval
-opscode -S all
+# Allow all shell commands
+ops -S all
 ```
 
-Via `~/.opscode/config.toml`:
+Or set them in `~/.opscode/config.toml`:
 
 ```toml
 [tools]
 shell_allow_list = ["tofu", "terraform", "kubectl", "helm", "ansible-playbook"]
 ```
 
-## Security subsystems & guardrails
+## Permission controls
 
-OpsCode layers multiple automated security defenses:
+Fine-grained permission flags in `~/.opscode/config.toml` complement approval modes:
 
-### 1. Fine-grained permission toggles
-
-Permission flags in `~/.opscode/config.toml` complement approval modes:
-
-| Permission | Default | Description |
+| Permission | Default | What it controls |
 |---|---|---|
 | `shell_read` | `true` | Non-mutating shell commands (e.g., `kubectl get`) |
 | `shell_write` | `false` | Mutating shell commands (e.g., `kubectl apply`) |
-| `file_read` | `true` | File read operations (`read_file`, `grep`, `glob`, `ls`) |
-| `file_write` | `false` | File write/edit/delete operations |
-| `infra_plan` | `false` | Infrastructure dry-run operations (`terraform plan`, `tofu plan`) |
-| `infra_apply` | `false` | Infrastructure mutating operations (`terraform apply`, `tofu apply`) |
+| `file_read` | `true` | File reads (`read_file`, `grep`, `glob`, `ls`) |
+| `file_write` | `false` | File writes, edits, and deletes |
+| `infra_plan` | `false` | Infrastructure dry-runs (`terraform plan`, `tofu plan`) |
+| `infra_apply` | `false` | Infrastructure mutations (`terraform apply`, `tofu apply`) |
 
-Inspect and toggle permissions interactively with `/permissions`.
+Use `/permissions` inside a session to inspect and toggle these interactively.
 
-### 2. Headless MCP guard (`HeadlessMCPGuardMiddleware`)
+## Security layers
 
-For unattended, CI/CD, or automated executions, MCP tools are classified into 4 security tiers:
-- `READ_ONLY` — Safe to run unattended
-- `MUTATING_SAFE` — Gated in headless mode
-- `MUTATING_DESTRUCTIVE` — Blocked in unattended mode
-- `PRIVILEGED` — Blocked in unattended mode
+OpsCode includes several automated security checks that run regardless of approval mode:
 
-### 3. Tool filtering proxy (`ToolFilterMiddleware`)
+### Shell safety classification
 
-Restricts subagents to their explicitly declared toolsets (`tools: ["execute", "mcp__*"]`) in frontmatter, preventing privilege escalation.
+Every shell command is analyzed before execution and classified as safe (read-only) or unsafe (mutating/privileged). This classification drives Auto mode decisions and allowlist matching.
 
-### 4. Unicode security scanner (`security/unicode_security.py`)
+### MCP tool security
 
-Scans all tool arguments and model inputs for:
-- Invisible zero-width characters
-- Homoglyph attacks (look-alike Unicode characters)
-- Bidirectional text overrides (Trojan Source attacks)
+When running unattended (headless or CI/CD), OpsCode automatically classifies each MCP tool into security tiers — read-only, mutating-safe, mutating-destructive, and privileged — and blocks anything unsafe from running without review.
 
-### 5. URL validation & SSRF guard (`security/url_validation.py`)
+### Subagent tool restrictions
 
-All web requests (`fetch_url`) are validated before execution:
-- Enforces permitted protocols (`http`, `https`)
-- Blocks loopback addresses (`127.0.0.1`, `localhost`, `::1`)
-- Blocks private IPv4/IPv6 networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
-- Blocks cloud provider metadata endpoints (`169.254.169.254`, `metadata.google.internal`)
+Subagents are restricted to their declared toolsets. A Terraform subagent can only use the tools listed in its definition — it can't access tools belonging to other subagents or escalate its own permissions.
+
+### Unicode security
+
+All tool arguments and model inputs are scanned for invisible zero-width characters, homoglyph attacks (look-alike Unicode), and bidirectional text overrides (Trojan Source attacks).
+
+### URL validation
+
+All web requests are validated before execution. OpsCode blocks requests to loopback addresses, private networks, and cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`).

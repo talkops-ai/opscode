@@ -1,80 +1,62 @@
-# Remote Sandboxes
+# Remote sandboxes
 
-> Execute OpsCode tools and commands in isolated, ephemeral remote cloud environments.
+> Run OpsCode in isolated cloud environments instead of on your local machine
 
-Remote sandboxes provide isolated execution environments where OpsCode executes tools (shell commands, file operations, script evaluations) without modifying your local developer workstation. This is ideal for:
+Remote sandboxes let OpsCode execute tools (shell commands, file operations, scripts) in an isolated cloud container instead of on your workstation. This is useful for:
 
-- **Security & Blast Radius Isolation:** Safely execute infrastructure commands and automated tests without risking local environments.
-- **Reproducibility:** Run in consistent, standardized Linux container environments.
-- **Credential Protection:** Prevent unintended access to local environment variables, SSH keys, or personal files.
-- **CI/CD Ephemeral Execution:** Spin up lightweight cloud sandboxes for automated pull request checks.
+- **Blast radius isolation** — Safely run infrastructure commands without risking your local environment.
+- **Reproducibility** — Consistent Linux container environments every time.
+- **Credential safety** — Prevent access to local SSH keys, env vars, or personal files.
+- **CI/CD** — Spin up ephemeral sandboxes for automated checks in pull requests.
 
----
-
-## Configuration & CLI flags
-
-| Flag | Description |
-|---|---|
-| `--sandbox [TYPE]` | Enable a remote sandbox provider (`agentcore`, `daytona`, `langsmith`, `modal`, `runloop`, `vercel`) |
-| `--sandbox-id ID` | Attach to an existing, already running sandbox by ID |
-| `--sandbox-snapshot-name NAME` | Launch from a pre-baked cloud container snapshot or blueprint |
-| `--sandbox-setup PATH` | Path to a local shell script executed inside the sandbox immediately after provisioning |
-
-### Launch examples
+## Launch a sandbox
 
 ```bash
-# Launch with default remote sandbox provider
-opscode --sandbox
+# Use the default sandbox provider
+ops --sandbox
 
-# Attach to an existing sandbox instance
-opscode --sandbox-id sb-prod-cluster-98234
+# Use a specific provider
+ops --sandbox daytona
 
-# Provision with a custom snapshot and setup script
-opscode --sandbox daytona \
+# Attach to an existing sandbox
+ops --sandbox-id sb-prod-cluster-98234
+
+# Use a pre-baked snapshot with a setup script
+ops --sandbox modal \
   --sandbox-snapshot-name terraform-k8s-base \
   --sandbox-setup ./scripts/sandbox-init.sh
 ```
 
----
+### CLI flags
 
-## Supported sandbox providers
+| Flag | What it does |
+|---|---|
+| `--sandbox [TYPE]` | Enable a sandbox provider (`agentcore`, `daytona`, `langsmith`, `modal`, `runloop`, `vercel`) |
+| `--sandbox-id ID` | Attach to an already-running sandbox |
+| `--sandbox-snapshot-name NAME` | Launch from a pre-baked container snapshot |
+| `--sandbox-setup PATH` | Shell script to run inside the sandbox after it starts |
 
-OpsCode integrates with 6 remote cloud sandbox providers out of the box (extensible via the `opscode.sandbox_providers` entry point group):
+## Supported providers
 
-| Provider | ID | Working Directory | Features | Backend Module |
-|---|---|---|---|---|
-| **AgentCore** | `agentcore` | `/tmp` | Managed AWS execution | `langchain_agentcore_codeinterpreter` |
-| **Daytona** | `daytona` | `/home/daytona` | Self-hosted & cloud dev environments | `langchain_daytona` |
-| **LangSmith** | `langsmith` | `/root` | Ephemeral evaluation sandboxes | Built-in |
-| **Modal** | `modal` | `/workspace` | Serverless GPU/CPU containers | `langchain_modal` |
-| **Runloop** | `runloop` | `/home/user` | Snapshots and fast container boot | `langchain_runloop` |
-| **Vercel** | `vercel` | `/vercel/sandbox` | Ephemeral Vercel code sandboxes | `langchain_vercel_sandbox` |
+| Provider | ID | Working directory | What it offers |
+|---|---|---|---|
+| **AgentCore** | `agentcore` | `/tmp` | Managed AWS execution |
+| **Daytona** | `daytona` | `/home/daytona` | Self-hosted & cloud dev environments |
+| **LangSmith** | `langsmith` | `/root` | Ephemeral evaluation sandboxes |
+| **Modal** | `modal` | `/workspace` | Serverless GPU/CPU containers |
+| **Runloop** | `runloop` | `/home/user` | Snapshots and fast container boot |
+| **Vercel** | `vercel` | `/vercel/sandbox` | Ephemeral Vercel code sandboxes |
 
----
+## Workspace sync
 
-## Workspace synchronization
-
-When a sandbox session starts, OpsCode automatically mirrors your local project workspace to the remote environment:
-
-1. Detects project boundaries using [Project Root Detection](./Configuration.md#project-detection).
-2. Traverses the repository tree.
-3. Uploads files directly into the sandbox working directory.
-4. Automatically skips ignored directories and files:
-   - `.opscode/`
-   - `.git/`
-   - `.venv/`, `venv/`, `env/`
-   - `node_modules/`
-   - `__pycache__/`, `.pytest_cache/`
-   - `*.pyc`, `*.lock` (optional exclusions)
-
----
+When a sandbox starts, OpsCode automatically uploads your project files to the remote environment. It detects project boundaries, traverses the repository tree, and skips common ignored directories (`.git/`, `node_modules/`, `.venv/`, `__pycache__/`).
 
 ## Setup scripts
 
-Use `--sandbox-setup` to execute initialization tasks immediately after container boot:
+Run initialization tasks inside the sandbox immediately after it starts:
 
 ```bash
-opscode --sandbox modal --sandbox-setup ./scripts/ci-setup.sh
+ops --sandbox modal --sandbox-setup ./scripts/ci-setup.sh
 ```
 
 **`./scripts/ci-setup.sh`:**
@@ -82,44 +64,30 @@ opscode --sandbox modal --sandbox-setup ./scripts/ci-setup.sh
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install required DevOps CLIs
+# Install DevOps tools
 apt-get update && apt-get install -y opentofu kubectl helm awscli
 
-# Verify toolchain versions
+# Verify
 tofu version
 kubectl version --client=true
 helm version
 ```
 
----
+## How routing works
 
-## Architecture & Execution Routing
+When a sandbox is active, OpsCode routes tool calls intelligently:
 
-When a remote sandbox is active, OpsCode uses a `CompositeBackend` to route operations intelligently:
+- **Shell commands, file reads/writes, grep, glob** → Remote sandbox
+- **Web search, URL fetching** → Local host (no need to proxy these)
 
-```
-┌────────────────────────────────────────────────────────┐
-│                   OpsCode Tool Execution               │
-├────────────────────────────────────────────────────────┤
-│ Shell Execution (`execute`)     ───> Remote Sandbox    │
-│ Filesystem Reads (`read_file`)  ───> Remote Sandbox    │
-│ Filesystem Writes (`write_file`)───> Remote Sandbox    │
-│ Grep / Glob / LS                ───> Remote Sandbox    │
-│ Web Search (`web_search`)       ───> Local Host        │
-│ URL Extraction (`fetch_url`)    ───> Local Host        │
-└────────────────────────────────────────────────────────┘
-```
+Sandboxes are automatically cleaned up when your session ends.
 
-All remote sandboxes are registered with `atexit` lifecycle handlers to guarantee clean remote container termination when your session ends.
+## CI/CD example
 
----
-
-## Non-interactive CI/CD execution
-
-Sandboxes can be combined with `-n`, `-y`, and `--rubric` for zero-trust automation in GitHub Actions or GitLab CI:
+Combine sandboxes with headless mode and rubrics for zero-trust automation:
 
 ```bash
-opscode -n "Run OpenTofu plan and check for security violations" \
+ops -n "Run OpenTofu plan and check for security violations" \
   --sandbox runloop \
   --sandbox-setup ./scripts/ci-init.sh \
   --rubric "tofu plan succeeds with zero syntax errors and no open security group ingress" \

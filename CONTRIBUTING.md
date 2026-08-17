@@ -1,6 +1,6 @@
 # Contributing to OpsCode
 
-Thank you for your interest in contributing to OpsCode! OpsCode is an autonomous AI agent purpose-built for DevOps, Site Reliability Engineering, and Infrastructure-as-Code.
+Thank you for your interest in contributing to OpsCode! Whether you're fixing a bug, adding a new subagent, building a plugin, or improving documentation — we appreciate every contribution.
 
 ---
 
@@ -8,74 +8,203 @@ Thank you for your interest in contributing to OpsCode! OpsCode is an autonomous
 
 ### Prerequisites
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended fast package manager)
+- [uv](https://docs.astral.sh/uv/) (fast package manager)
 - Git
 
-### 1. Clone & Set Up Environment
+### 1. Clone & install
 
 ```bash
-# Clone the repository
 git clone https://github.com/talkops-ai/opscode.git
 cd opscode
 
-# Create a virtual environment
+# Create a virtual environment and install
 uv venv --python 3.12
 source .venv/bin/activate
-
-# Install all dev and test dependencies in editable mode
 uv pip install -e ".[dev,test-integration]"
 ```
 
-### 2. Running Tests
+### 2. Run tests
 
 ```bash
-# Run unit tests (fast, no API keys required)
+# Unit tests (fast, no API keys required)
 uv run pytest tests/ -m unit -v
 
-# Run with coverage report
+# With coverage
 uv run pytest tests/ -m unit --cov=opscode --cov-report=term-missing
 ```
 
-### 3. Shell Syntax Validation
+### 3. Validate scripts
 
 ```bash
-# Validate installer scripts
 bash -n scripts/install.sh
 ```
 
 ---
 
-## 🧩 Adding a Custom Subagent or Skill
+## 🧩 Adding Skills
 
-### Adding a Built-in Skill
-1. Create a new directory under `src/opscode/built_in_skills/<skill-name>/`.
-2. Add a `SKILL.md` file with YAML frontmatter:
-   ```yaml
+### Built-in skills
+
+Built-in skills live in `src/opscode/built_in_skills/`. OpsCode ships with 4: `cloud-core`, `docker`, `kubernetes`, and `remember`.
+
+1. Create a directory: `src/opscode/built_in_skills/<skill-name>/`
+2. Add a `SKILL.md` with YAML frontmatter:
+   ```markdown
    ---
    name: my-skill
-   description: Explains what this skill does and when the agent should trigger it
+   description: What this skill does and when the agent should activate it
    ---
-   # Skill Instructions
-   ...
+   # Instructions
+   When this skill is activated, perform the following steps:
+   1. ...
    ```
-3. Add any reference documents under `references/` or templates under `assets/`.
-4. Run `uv run pytest tests/unit_tests/skills/` to verify discovery.
+3. Add reference docs under `references/` or templates under `assets/` if needed.
+4. Verify discovery: `uv run pytest tests/unit_tests/skills/`
 
-### Adding an Enterprise Subagent
-1. Create a directory under `src/opscode/built_in_subagents/<subagent-name>/`.
-2. Add the agent markdown definition under `agents/<subagent-name>.md`.
-3. Add domain-specific skills under `skills/` and optional `.mcp.json`.
-4. Register the subagent in `src/opscode/agent/factory.py`.
-5. Run `uv run pytest tests/unit_tests/subagents/` to verify isolated branch memory.
+### User and project skills
+
+Users can also create skills without modifying the codebase:
+
+```
+~/.opscode/{agent}/skills/<skill-name>/SKILL.md   # User-level
+.opscode/skills/<skill-name>/SKILL.md             # Project-level
+```
+
+See [Memory and Skills](docs/opscode-docs/memory-and-skills.md) for the full resolution order.
+
+---
+
+## 🤖 Adding Subagents
+
+### Built-in subagents
+
+Built-in subagents live in `src/opscode/built_in_subagents/`. Each has its own skills directory and an agent definition:
+
+```
+src/opscode/built_in_subagents/<subagent-name>/
+├── agents/
+│   └── <subagent-name>.md    # System prompt with YAML frontmatter
+├── skills/                    # Domain-specific skills
+│   ├── skill-one/
+│   │   └── SKILL.md
+│   └── skill-two/
+│       └── SKILL.md
+└── .mcp.json                  # Optional — embedded MCP server config
+```
+
+Steps:
+1. Create the directory structure above under `src/opscode/built_in_subagents/`.
+2. Write the agent definition with frontmatter (`name`, `description`, `tools`, `skills`, `permission_tier`).
+3. Add domain skills under `skills/`.
+4. Add `.mcp.json` if the subagent needs an external tool server.
+5. Verify: `uv run pytest tests/unit_tests/subagents/`
+
+### Custom subagents (no code changes)
+
+Users can add subagents without touching the codebase:
+
+```
+~/.opscode/{agent}/agents/<name>/AGENTS.md         # User-level
+.opscode/agents/<name>/AGENTS.md                   # Project-level
+```
+
+See [Subagents](docs/opscode-docs/subagents.md) for the full frontmatter reference.
+
+---
+
+## 🔌 Adding Plugins
+
+Plugins bundle skills, subagents, MCP servers, slash commands, and hooks into a shareable package. There are three plugin types:
+
+### Agent plugin (bundles a subagent)
+
+```
+my-agent-plugin/
+├── .claude-plugin/
+│   └── plugin.json
+├── agents/
+│   └── my-agent.md
+└── skills/
+    └── my-skill/
+        └── SKILL.md
+```
+
+### Vertical plugin (extends the main agent)
+
+```
+my-vertical-plugin/
+├── .claude-plugin/
+│   └── plugin.json
+├── commands/                # Custom slash commands
+│   └── my-command.md
+├── hooks/
+│   └── hooks.json
+└── skills/
+    └── my-skill/
+        └── SKILL.md
+```
+
+### Partner-built plugin (third-party integration)
+
+```
+my-partner-plugin/
+├── .claude-plugin/
+│   └── plugin.json
+├── .mcp.json                # MCP server (supports ${VAR} substitution)
+├── CONNECTORS.md            # External service setup guide
+└── skills/
+    └── my-skill/
+        └── SKILL.md
+```
+
+### plugin.json
+
+```json
+{
+  "name": "my-plugin",
+  "version": "0.1.0",
+  "description": "What this plugin does",
+  "author": {
+    "name": "Your Name"
+  }
+}
+```
+
+Place plugins in `.opscode/plugins/` for project-level distribution or publish to a marketplace. Run plugin tests with:
+
+```bash
+uv run pytest tests/unit_tests/plugins/
+```
+
+See [Plugins](docs/opscode-docs/plugins.md) for the full architecture.
+
+---
+
+## 📖 Documentation
+
+Documentation lives in two places:
+
+| Location | What it covers |
+|---|---|
+| `README.md` | Project overview — keep it high-level and non-technical |
+| `docs/opscode-docs/` | Detailed feature docs — one file per topic |
+
+### Style guidelines
+
+- **Human-readable**: Write for users, not developers. Avoid internal class names, module paths, and middleware references.
+- **Task-oriented**: Lead with what the user can do, not how it's built internally.
+- **Balanced**: Follow the tone of `docs/dcode-docs/` — conversational but precise.
+- **No implementation jargon**: Say "OpsCode classifies the command" not "the `AutoModeHITLMiddleware` invokes the `ShellSafetyScanner`".
 
 ---
 
 ## 📝 Pull Request Guidelines
 
-1. **Create a topic branch:** `git checkout -b feature/my-enhancement`
-2. **Commit conventions:** Use conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`).
-3. **Ensure tests pass:** Run `uv run pytest tests/ -m unit`.
-4. **Submit PR:** Open a Pull Request on GitHub against `main`.
+1. **Branch from main:** `git checkout -b feature/my-enhancement`
+2. **Conventional commits:** Use `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`.
+3. **Tests pass:** `uv run pytest tests/ -m unit`
+4. **Lint clean:** Ensure no regressions in existing tests.
+5. **Open a PR** against `main` with a clear description of what changed and why.
 
 ---
 

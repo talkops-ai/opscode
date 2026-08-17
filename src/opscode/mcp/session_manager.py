@@ -235,45 +235,58 @@ class MCPSessionManager:
                         logger.warning("Error closing MCP session for %s: %s", name, e)
 
     async def connect_all(self, trust_project: bool = True) -> list[Any]:
-        """Connect to all configured servers and return converted LangChain tools."""
-        all_tools = []
-        for name, config in self._config.items():
+        """Connect to all configured servers concurrently and return converted LangChain tools."""
+        from langchain_core.tools import StructuredTool
+
+        async def _connect_single(name: str, config: dict[str, Any]) -> list[Any]:
             is_stdio = (config.get("type") or config.get("transport") or "stdio") == "stdio"
             is_project_level = config.get("source") == "project"
             if is_stdio and is_project_level and not trust_project:
                 logger.warning("Skipping untrusted project stdio MCP server: %s", name)
-                continue
-                
+                return []
+
             try:
-                session = await self.connect(name, config)
-                tools = await self.list_tools(name)
-                # Cache tools on the session entry for sync get_server_status
-                if name in self._sessions:
-                    self._sessions[name]._cached_tools = tools
-                self._errors.pop(name, None)  # Clear any previous error
+                async with asyncio.timeout(5.0):
+                    session = await self.connect(name, config)
+                    tools = await self.list_tools(name)
+                    # Cache tools on the session entry for sync get_server_status
+                    if name in self._sessions:
+                        self._sessions[name]._cached_tools = tools
+                    self._errors.pop(name, None)  # Clear any previous error
 
-                from langchain_core.tools import StructuredTool
+                    server_tools: list[Any] = []
+                    for t in tools:
+                        t_name = getattr(t, "name", str(t))
+                        raw_schema = getattr(t, "inputSchema", None)
+                        t_schema: dict[str, Any] = raw_schema if isinstance(raw_schema, dict) else {}
 
-                for t in tools:
-                    t_name = getattr(t, "name", str(t))
-                    raw_schema = getattr(t, "inputSchema", None)
-                    t_schema: dict[str, Any] = raw_schema if isinstance(raw_schema, dict) else {}
+                        def _make_tool_coro(srv_name: str, raw_tool_name: str, schema: Any) -> Callable[..., Awaitable[Any]]:
+                            async def _coro(runtime: Any = None, **arguments: Any) -> Any:
+                                cleaned = _normalize_mcp_arguments(arguments, schema)
+                                return await self.call_tool(srv_name, raw_tool_name, cleaned)
+                            return _coro
 
-                    def _make_tool_coro(srv_name: str, raw_tool_name: str, schema: Any) -> Callable[..., Awaitable[Any]]:
-                        async def _coro(runtime: Any = None, **arguments: Any) -> Any:
-                            cleaned = _normalize_mcp_arguments(arguments, schema)
-                            return await self.call_tool(srv_name, raw_tool_name, cleaned)
-                        return _coro
-
-                    l_tool = StructuredTool(
-                        name=t_name,
-                        description=getattr(t, "description", "") or "",
-                        args_schema=t_schema,
-                        coroutine=_make_tool_coro(name, t_name, t_schema),
-                    )
-                    all_tools.append(l_tool)
+                        l_tool = StructuredTool(
+                            name=t_name,
+                            description=getattr(t, "description", "") or "",
+                            args_schema=t_schema,
+                            coroutine=_make_tool_coro(name, t_name, t_schema),
+                        )
+                        server_tools.append(l_tool)
+                    return server_tools
+            except TimeoutError:
+                self._errors[name] = "Connection timed out after 5.0s"
+                logger.warning("MCP server %s timed out during connect", name)
+                return []
             except Exception as e:
                 self._errors[name] = str(e)
                 logger.warning("Failed to connect/load tools for MCP server %s: %s", name, e)
-                
+                return []
+
+        coros = [_connect_single(name, cfg) for name, cfg in self._config.items()]
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        all_tools: list[Any] = []
+        for res in results:
+            if isinstance(res, list):
+                all_tools.extend(res)
         return all_tools

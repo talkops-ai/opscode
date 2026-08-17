@@ -1,23 +1,27 @@
 <div align="center">
 
-# ⚡ OpsCode
+<img src="assets/opscode_logo.jpeg" alt="OpsCode" width="120">
 
-**A terminal-native AI agent that safely writes, refactors, and validates Terraform, Kubernetes, and CI/CD pipelines. Built on LangGraph with strict human-in-the-loop guardrails.**
+# OpsCode
 
-[![CI Pipeline](https://github.com/talkops-ai/opscode/actions/workflows/ci.yml/badge.svg)](https://github.com/talkops-ai/opscode/actions/workflows/ci.yml)
+**A terminal-native AI agent for DevOps, SRE, and Platform Engineering. Ships with built-in subagents, skills and a plugin system to extend it to any stack. Built on LangGraph with modes to manage human in the loop.**
+
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-FF6F00.svg?style=flat-square&logo=langchain&logoColor=white)](https://langchain.com/)
-[![Deep Agents SDK](https://img.shields.io/badge/framework-Deep%20Agents-10B981.svg?style=flat-square)](https://docs.langchain.com/)
+[![Deep Agents SDK](https://img.shields.io/badge/framework-Deep%20Agents%20SDK-10B981.svg?style=flat-square)](https://docs.langchain.com/)
 [![MCP Ready](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-009688.svg?style=flat-square)](https://modelcontextprotocol.io/)
+[![Textual TUI](https://img.shields.io/badge/TUI-Textual-7C3AED.svg?style=flat-square)](https://textual.textualize.io/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](LICENSE)
 
-[Quickstart](#-quickstart-30-seconds) • [Why OpsCode?](#-why-opscode-strategic-differentiators) • [Safety & Guardrails](#-safety--guardrails-engineering-trust-in-iac) • [Architecture](#-architecture--multi-agent-state-machines) • [Subagents](#-built-in-enterprise-devops-subagents) • [Documentation](#-documentation-index)
+[Quickstart](#-quickstart-30-seconds) • [Why OpsCode?](#%EF%B8%8F-why-opscode) • [Safety & Guardrails](#%EF%B8%8F-safety--guardrails) • [Subagents & Plugins](#-subagents--plugins) • [Architecture](#%EF%B8%8F-architecture) • [Docs](#-documentation)
 
 </div>
 
 ---
 
-## 🖥️ Terminal Interface
+## 🖥️ See It in Action
+
+<!-- TODO: Replace this ASCII mock with a VHS-generated terminal GIF/video once recorded -->
 
 ```
 ┌─ OpsCode v0.1.0 ────────────────────────────────────────── [Auto: Shift+Tab] ──┐
@@ -40,8 +44,8 @@
 │ │ + }                                                                        │ │
 │ └────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                │
-│ ⚡ Action Required: [Approve (Enter)]  [Edit Diff (e)]  [Reject (Esc)]           │
-└─────────────────────────────────────────────────────── Model: claude-3.7-sonnet ┘
+│ ⚡ Action Required: [Approve (Enter)]  [Edit Diff (e)]  [Reject (Esc)]         │
+└─────────────────────────────────────────────────────────── Model: claude-3.7-sonnet ┘
 ```
 
 ---
@@ -50,24 +54,28 @@
 
 ### 1. Install
 
-Install OpsCode directly into your environment:
-
 ```bash
 curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.0/scripts/install.sh | bash
 ```
 
 > [!NOTE]
-> **Windows Users:** Running inside **WSL (Windows Subsystem for Linux)** is strongly recommended for native shell execution and toolchain compatibility.
+> **Windows users:** We strongly recommend running inside **WSL (Windows Subsystem for Linux)** for proper shell and toolchain compatibility.
 
-### 2. Configure Credentials
+### 2. Launch the TUI & Configure Your LLM
 
-Launch the credential wizard to connect your model provider:
+Start OpsCode by running:
 
 ```bash
-ops /auth
+ops
 ```
 
-Or export your API key in your terminal profile (`~/.zshrc` / `~/.bashrc`):
+This opens the interactive terminal UI. Once inside, type the `/auth` slash command to open the credential manager and configure your model provider (Anthropic, OpenAI, Google, etc.):
+
+```
+/auth
+```
+
+Alternatively, you can export your API key directly in `~/.zshrc` or `~/.bashrc`:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -75,59 +83,80 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # or: export GOOGLE_API_KEY="..."
 ```
 
-### 3. Run Your First Task
+### 3. Start Working
 
-```bash
-# Interactive TUI mode:
-ops -m "Generate a least-privilege AWS IAM policy for an S3 bucket"
+Once credentials are set, just type your prompt in the TUI chat input:
 
-# Or non-interactive CI/CD execution:
-ops -n "Run tofu validate and fix any missing variable declarations"
 ```
+Generate a least-privilege AWS IAM policy for an S3 bucket
+```
+
+OpsCode will pick the right subagent, show you a syntax-highlighted diff, and wait for your approval before touching anything.
+
+That's it. You're up and running.
 
 ---
 
-## ⚖️ Why OpsCode? (Strategic Differentiators)
+## ⚖️ Why OpsCode?
 
-General-purpose AI coding assistants excel at application code, but lack the domain safety, state locking awareness, and toolchain integration required for cloud infrastructure. OpsCode is purpose-built for the infrastructure lifecycle.
+General-purpose coding agents are great at application code. But they weren't built for infrastructure. They don't understand state locking, blast radius, or why running `terraform apply` without review is a terrible idea.
 
-### Comparison: AI Coding Agents
+OpsCode is purpose-built for the infrastructure lifecycle — and here's why it stands apart.
+
+### How It Compares
 
 | Feature | Aider | OpenHands | Claude Code | OpsCode |
 |---|:---:|:---:|:---:|:---:|
-| **Primary Interface** | Terminal CLI | Web Canvas / CLI | Terminal CLI | **Terminal TUI & Headless CLI** |
-| **Core Focus** | Git-native App Code | Full-stack Software | General Coding | **DevOps, SRE, & Platform IaC** |
-| **Execution Guardrails** | Git Revert | Docker Sandbox | User Confirmation | **3-Tier Approval + Shell/Unicode Scanners** |
-| **Multi-Agent Memory** | Shared Context | Multi-Agent Threads | Monolithic Context | **Isolated `BranchMemoryStore` Subagents** |
-| **IaC State Protection** | — | — | — | **"Produce Diffs, Not Deployments"** |
-| **CI/CD Self-Evaluation** | — | Test Suites | — | **Autonomous `--rubric` Grader Loops** |
+| **Interface** | Terminal CLI | Web Canvas / CLI | Terminal CLI | **Terminal TUI & Headless CLI** |
+| **Focus** | Git-native app code | Full-stack software | General coding | **DevOps, SRE, & Platform IaC** |
+| **Guardrails** | Git revert | Docker sandbox | User confirmation | **3-Tier Approval + Shell/Unicode Scanners** |
+| **Multi-Agent Memory** | Shared context | Multi-agent threads | Monolithic context | **Isolated `BranchMemoryStore` per subagent** |
+| **IaC State Safety** | — | — | — | **"Produce Diffs, Not Deployments"** |
+| **Extensibility** | Limited | Plugin API | Skills/MCP | **Plugins, Marketplace, Custom Subagents, MCP** |
+| **CI/CD Self-Grading** | — | Test suites | — | **Autonomous `--rubric` grader loops** |
 | **MCP Integration** | — | Native | Native | **Native + 4-Tier Security Guard** |
 
-### 1. Domain Expertise vs. Generalist
-Generic coding agents pollute the main context window with hundreds of lines of raw Terraform schema lookups, Kubernetes manifests, and CLI errors, causing context overflow and hallucinated configurations. OpsCode uses **6 specialized subagents** that operate in isolated memory sandboxes (`BranchMemoryStore`). Intermediate reasoning tokens, documentation searches, and failed plan outputs are resolved inside the subagent, returning only the final, validated configuration to your workspace.
+### 1. Domain Expertise With Isolated Subagents
 
-### 2. Safety vs. Unchecked Autonomy
-Application code can be rolled back with `git revert`. Infrastructure failures (corrupted `.tfstate` files, dropped databases, public security groups) create catastrophic blast radiuses. OpsCode follows the **"Produce Diffs, Not Deployments"** principle:
+Generic coding agents dump hundreds of lines of raw Terraform schemas, Kubernetes manifests, and CLI errors straight into the main context window. That leads to context overflow and hallucinated configs.
+
+OpsCode takes a different approach. It ships with **6 specialized subagents** — each running in its own isolated memory sandbox (`BranchMemoryStore`). When a subagent searches AWS docs or iterates on a broken plan, all that messy intermediate work stays inside the subagent. Only the final, validated result comes back to your workspace.
+
+### 2. Extend It to Any Stack
+
+The built-in subagents cover Terraform, OpenTofu, Kubernetes, Ansible, Jenkins, and GitHub Actions. But OpsCode is designed to be extended:
+
+- **Plugin system:** Install plugins from a marketplace or drop them into `.opscode/plugins/` — each can bundle new skills, subagents, MCP servers, and slash commands.
+- **Custom subagents:** Create your own subagents in `.opscode/agents/` or `~/.opscode/agents/` — just an `AGENTS.md` file with YAML frontmatter.
+- **7-tier skill hierarchy:** Add skills at any level — built-in, plugin, user, or project — with deterministic priority resolution.
+- **Async remote subagents:** Connect to remote LangGraph deployments via `config.toml` for distributed workloads.
+
+### 3. Safety First, Not Unchecked Autonomy
+
+Application code gone wrong? `git revert` and move on. Infrastructure gone wrong? Corrupted `.tfstate` files, dropped databases, public security groups — those create real damage with real blast radius.
+
+OpsCode follows the **"Produce Diffs, Not Deployments"** principle:
 - It generates plans, validates syntax, and inspects schemas.
-- It presents visual, syntax-highlighted diffs for explicit human approval.
-- It is architecturally restrained from performing un-sandboxed `terraform apply` or destructive deletions without human consent.
+- It shows you syntax-highlighted diffs and waits for your explicit approval.
+- It will **not** run `terraform apply` or perform destructive operations without your consent.
 
-### 3. Dual-Mode: Interactive TUI & Headless CI/CD
-OpsCode is equally comfortable in your local terminal and in your automated CI/CD pipelines:
-- **Interactive TUI:** Rich Textual interface with real-time reasoning streams, `/model` hot-swapping, and `Shift+Tab` approval mode toggling.
-- **Headless Mode (`-n`):** Pipe stdout/stdin in Jenkins, GitHub Actions, or GitLab CI (`cat pod.yaml | ops -n "..." --rubric @specs/k8s.md -y`).
+### 4. Works in Your Terminal and Your Pipelines
+
+OpsCode isn't just an interactive tool — it runs equally well in CI/CD:
+- **Interactive TUI:** Rich Textual interface with live reasoning streams, `/model` hot-swapping, and `Shift+Tab` to toggle approval modes on the fly.
+- **Headless Mode (`-n`):** Pipe it into Jenkins, GitHub Actions, or GitLab CI. Example: `cat pod.yaml | ops -n "..." --rubric @specs/k8s.md -y`
 
 ---
 
-## 🛡️ Safety & Guardrails: Engineering Trust in IaC
+## 🛡️ Safety & Guardrails
 
-Deploying AI to infrastructure requires strict, deterministic controls. OpsCode implements multi-layer defense mechanisms at every stage of execution.
+Handing AI the keys to your infrastructure requires real trust. So we built OpsCode with multiple layers of defense — not as an afterthought, but as a core design principle.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        OpsCode Security Architecture                   │
 ├────────────────────────────────────────────────────────────────────────┤
-│  User Request ──> Unicode & Shell Scanner ──> Approval Mode Evaluator   │
+│  User Request ──> Unicode & Shell Scanner ──> Approval Mode Evaluator  │
 │                                                │                       │
 │    ┌───────────────────┬───────────────────────┴────────────────────┐  │
 │    ▼                   ▼                                            ▼  │
@@ -141,40 +170,41 @@ Deploying AI to infrastructure requires strict, deterministic controls. OpsCode 
 │                           [READ_ONLY | MUTATING_SAFE | PRIVILEGED]     │
 │                                                │                       │
 │                                                ▼                       │
-│                           "Produce Diffs, Not Deployments" (IaC Gate) │
+│                           "Produce Diffs, Not Deployments" (IaC Gate)  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3-Tier Approval Safety Engine
+### 3-Tier Approval Engine
 
-Cycle instantly between approval modes during an active session using **`Shift+Tab`**:
+Switch between approval modes mid-session with **`Shift+Tab`**:
 
-1. **Manual Mode (Default):** Prompts an interactive modal for every shell execution and file modification (`[Approve]`, `[Reject]`, `[Edit Command]`, `[Always Allow]`).
-2. **Auto Mode (`-y`, `--auto-approve`):** Powered by `AutoModeHITLMiddleware` and `security/shell_safety.py`. Automatically approves safe, read-only commands (`ls`, `grep`, `kubectl get`, `tofu plan`) while strictly halting before any mutating or destructive action.
-3. **YOLO Mode (`--yolo`):** Executes all actions without prompting. Requires initial explicit acknowledgement of operational risk.
+1. **Manual Mode (default):** Every shell command and file edit gets an interactive prompt — `[Approve]`, `[Reject]`, `[Edit Command]`, or `[Always Allow]`. Nothing runs without your say-so.
+2. **Auto Mode (`-y`):** A classifier decides which commands are safe. Read-only commands (`ls`, `grep`, `kubectl get`, `tofu plan`) run automatically. Anything mutating or destructive stops and asks.
+3. **YOLO Mode (`--yolo`):** Everything runs without prompting. You'll need to explicitly acknowledge the risk before this kicks in.
 
 > [!TIP]
-> Use `Shift+Tab` at any point during an interactive session to switch between **Manual** and **Auto** modes on the fly.
+> Hit `Shift+Tab` at any time during an interactive session to flip between **Manual** and **Auto** modes.
 
 > [!CAUTION]
-> Never run `--yolo` mode against production cloud accounts or live production cluster contexts.
+> Don't run `--yolo` mode against production cloud accounts or live cluster contexts. Seriously.
 
-### Multi-Layer Guardrails
-- **Shell Safety Scanner (`security/shell_safety.py`):** Static analysis classifier that intercepts dangerous shell commands and enforces customizable execution allowlists (`-S recommended`, `-S all`, `-S "cmd1,cmd2"`).
-- **Unicode Security Scanner (`security/unicode_security.py`):** Protects against Trojan Source attacks, bidirectional Unicode manipulation (Bidi overrides), and homoglyph spoofing.
-- **SSRF & URL Guard (`security/url_validation.py`):** Blocks agent tool requests to cloud metadata endpoints (`169.254.169.254`), localhost, and private RFC-1918 networks.
-- **Headless MCP Guard (`HeadlessMCPGuardMiddleware`):** Programmatically classifies external MCP tools into 4 security tiers (`READ_ONLY`, `MUTATING_SAFE`, `MUTATING_DESTRUCTIVE`, `PRIVILEGED`) for unattended execution.
+### Multi-Layer Defense
+
+- **Shell Safety Scanner:** Every shell command is classified before execution. You can configure allowlists to control what runs automatically (`-S recommended`, `-S all`, or a custom CSV list).
+- **Unicode Security Scanner:** Catches Trojan Source attacks, bidirectional text manipulation, and homoglyph spoofing before they reach your codebase.
+- **SSRF & URL Guard:** Blocks requests to cloud metadata endpoints (`169.254.169.254`), localhost, and private RFC-1918 ranges.
+- **Headless MCP Guard:** When running unattended, OpsCode classifies each MCP tool into security tiers (read-only, mutating, destructive, privileged) and blocks anything unsafe.
 
 ---
 
-## 🤖 Built-in Enterprise DevOps Subagents
+## 🤖 Subagents & Plugins
 
-OpsCode includes **6 specialized subagents**, each running with dedicated domain skills, isolated branch memory (`BranchMemoryStore`), and scoped tool bindings:
+OpsCode ships with **6 specialized subagents** out of the box. Each one has its own domain skills, isolated memory, and scoped tool bindings. They don't pollute each other's context.
 
 ```
                   ┌───────────────────────────────┐
-                  │    Root Orchestration Agent   │
-                  │   (Global Context & Router)   │
+                  │    Root Orchestration Agent    │
+                  │   (Global Context & Router)    │
                   └───────────────┬───────────────┘
                                   │
       ┌──────────────┬────────────┼────────────┬──────────────┐
@@ -188,86 +218,89 @@ OpsCode includes **6 specialized subagents**, each running with dedicated domain
                                   ▼
                     ┌───────────────────────────┐
                     │     Isolated Memory       │
-                    │   (BranchMemoryStore)     │
+                    │    (Per-Subagent Store)    │
                     └───────────────────────────┘
 ```
 
-| Subagent | Specialization | Encapsulated Skills (34 Total) | Embedded MCP |
+### Built-in Subagents
+
+| Subagent | What It Does | Skills (34 Total) | MCP |
 |---|---|---|:---:|
-| **`aws-opentofu-provisioner`** | OpenTofu / AWS | `opentofu-data-security`, `opentofu-iam-security`, `opentofu-mcp-schema-lookup`, `opentofu-module-layout`, `opentofu-state-management`, `opentofu-testing-validation`, `opentofu-vpc-networking` | ✅ |
-| **`aws-terraform-module-writer`** | Terraform / AWS | `aws-data-security-enforcement`, `aws-iam-policy-engine`, `aws-vpc-network-patterns`, `terraform-iteration-patterns`, `terraform-mcp-schema-lookup`, `terraform-module-layout`, `terraform-repair-loop` | ✅ |
-| **`ci-jenkins-automater`** | Jenkins Pipelines | `jenkins-job-dsl-jcasc`, `jenkins-pipeline-generation`, `jenkins-pipeline-testing`, `jenkins-shared-libraries` | — |
-| **`github-actions-writer`** | GitHub Workflows | `github-actions-architecture`, `github-actions-performance`, `github-actions-security-hardening`, `github-actions-vulnerability-mitigation` | — |
-| **`infra-ansible-provisioner`** | Ansible Automation | `ansible-code-authoring`, `ansible-environment-setup`, `ansible-execution-environments`, `ansible-linting-remediation`, `ansible-mcp-schema-lookup`, `ansible-runner-execution`, `ansible-security-operations` | ✅ |
+| **`aws-opentofu-provisioner`** | OpenTofu on AWS | `opentofu-data-security`, `opentofu-iam-security`, `opentofu-mcp-schema-lookup`, `opentofu-module-layout`, `opentofu-state-management`, `opentofu-testing-validation`, `opentofu-vpc-networking` | ✅ |
+| **`aws-terraform-module-writer`** | Terraform on AWS | `aws-data-security-enforcement`, `aws-iam-policy-engine`, `aws-vpc-network-patterns`, `terraform-iteration-patterns`, `terraform-mcp-schema-lookup`, `terraform-module-layout`, `terraform-repair-loop` | ✅ |
+| **`ci-jenkins-automater`** | Jenkins pipelines | `jenkins-job-dsl-jcasc`, `jenkins-pipeline-generation`, `jenkins-pipeline-testing`, `jenkins-shared-libraries` | — |
+| **`github-actions-writer`** | GitHub workflows | `github-actions-architecture`, `github-actions-performance`, `github-actions-security-hardening`, `github-actions-vulnerability-mitigation` | — |
+| **`infra-ansible-provisioner`** | Ansible automation | `ansible-code-authoring`, `ansible-environment-setup`, `ansible-execution-environments`, `ansible-linting-remediation`, `ansible-mcp-schema-lookup`, `ansible-runner-execution`, `ansible-security-operations` | ✅ |
 | **`k8s-helm-provisioner`** | Kubernetes & Helm | `helm-chart-authoring`, `helm-deployment-recovery`, `helm-schema-validation`, `helm-security-secrets`, `helm-testing` | — |
 
+### Bring Your Own Subagents & Skills
+
+The 6 built-in subagents are just the starting point. You can extend OpsCode to cover any domain:
+
+**Custom subagents** — Drop an `AGENTS.md` file with YAML frontmatter into a directory and OpsCode picks it up:
+
+```
+.opscode/agents/
+└── sre-incident-responder/
+    └── AGENTS.md          # name, description, system prompt, skills, tools
+```
+
+**Marketplace plugins** — Install community or team plugins that bundle subagents, skills, MCP configs, and commands:
+
+```bash
+ops plugin install kubernetes-sre@company-marketplace
+```
+
+**Plugin types:** OpsCode automatically distinguishes between two kinds:
+- **Agent plugins** (have an `agents/` dir) — skills and MCP configs bind to the plugin's subagent only.
+- **Non-agent plugins** (no `agents/` dir) — skills and MCP configs bind to the main root agent.
+
 > [!IMPORTANT]
-> **Context Engineering:** OpsCode implements progressive disclosure. Subagent domain skills are only loaded into context when relevant files or tasks are detected, preserving your model's token budget and reducing hallucinations.
+> **How context stays lean:** OpsCode uses progressive disclosure — subagent skills are only loaded when relevant files or tasks show up in your workspace. If you're not working on Terraform, those skills don't eat your token budget. This keeps hallucinations low and responses fast.
 
 ---
 
-## 🏗️ Architecture & Multi-Agent State Machines
+## 🏗️ Architecture
 
-OpsCode is engineered on top of the **Deep Agents SDK** and **LangGraph Pregel state machines**, executing turns through an 18-middleware processing pipeline:
+OpsCode is built on the **Deep Agents SDK** and **LangGraph** state machines. Every agent turn passes through a modular middleware pipeline that handles:
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                         OpsCode 18-Middleware Pipeline                 │
-├────────────────────────────────────────────────────────────────────────┤
-│ 1. UnifiedSystemMessageMiddleware  - Synthesizes persona & core skills │
-│ 2. LocalContextMiddleware          - Injects Git state & DevOps markers│
-│ 3. ResumeStateMiddleware           - Restores thread checkpoint state  │
-│ 4. ConfigurableModelMiddleware     - Hot-swaps models at runtime       │
-│ 5. CostTrackingMiddleware          - Token usage & live USD calculation│
-│ 6. GlmTerminalStallRecoveryMW      - Deadlock prevention in non-TUI    │
-│ 7. ShellAllowListMiddleware        - Evaluates auto-approved shell cmds│
-│ 8. ServerHooksMiddleware           - Dispatches to hooks.json bus      │
-│ 9. MCPContextMiddleware            - Manages MCP sessions and tools    │
-│ 10. HeadlessMCPGuardMiddleware     - 4-tier security gating in CI/auto │
-│ 11. ToolFilterMiddleware           - Frontmatter tool filtering proxy  │
-│ 12. PluginSkillsMiddleware         - 7-tier skill discovery & injection│
-│ 13. GoalStateNoticeMiddleware      - Acceptance criteria notifications │
-│ 14. GoalCriteriaMiddleware         - Acceptance criteria evaluation    │
-│ 15. CompactionMiddleware           - Automated context summarization   │
-│ 16. ReliableRubricMiddleware       - Autonomous CI/CD grading loop     │
-│ 17. CodeInterpreterMiddleware      - QuickJS REPL & PTC execution      │
-│ 18. SubagentsMiddleware            - Multi-agent dispatch & monitoring │
-└────────────────────────────────────────────────────────────────────────┘
-```
+- **Context injection** — Git state, DevOps environment markers, and skill discovery
+- **Model management** — Hot-swap models mid-session, track token usage and costs in real-time
+- **Safety gates** — Shell command classification, MCP tool security tiers, and approval mode enforcement
+- **Plugin & skill loading** — Discovers skills from 7 sources (built-in → plugins → user → project) and injects them on demand
+- **Session continuity** — SQLite-backed thread checkpointing, context compaction, and session resume
+- **Autonomous grading** — Rubric evaluation loops and goal acceptance criteria checks
+- **Subagent orchestration** — Dispatches tasks to specialized subagents with isolated memory
 
-### 7-Tier Skill Resolution Hierarchy
+See the [Overview doc](docs/opscode-docs/overview.md) for the full middleware breakdown.
 
-OpsCode discovers and loads skills (`SKILL.md`) following a deterministic 7-tier hierarchy:
+### Skill Resolution
+
+Skills are loaded from multiple locations. Project-level skills take priority over user-level, which take priority over plugins and built-in defaults:
 
 ```
-[Tier 7] Claude Experimental Skills (~/.claude/skills/, .claude/skills/)
-   ▲
-[Tier 6] Project Agents Skills (.agents/skills/)
-   ▲
-[Tier 5] Project OpsCode Skills (.opscode/skills/)
-   ▲
-[Tier 4] User Agents Skills (~/.agents/skills/)
-   ▲
-[Tier 3] User OpsCode Skills (~/.opscode/skills/)
-   ▲
-[Tier 2] Active Plugin Skills (Non-agent marketplace plugins)
-   ▲
-[Tier 1] Built-in Skills (src/opscode/built_in_skills/)
+Project skills (.opscode/skills/, .agents/skills/)
+   ▲ overrides
+User skills (~/.opscode/skills/, ~/.agents/skills/)
+   ▲ overrides
+Plugin skills (marketplace plugins)
+   ▲ overrides
+Built-in skills (ships with OpsCode)
 ```
 
-### Supported Model Providers & Extended Thinking
+### Supported Models & Providers
 
-OpsCode supports **20+ providers** with first-class streaming and extended reasoning tokens:
+OpsCode works with **20+ providers** out of the box, with first-class streaming and extended reasoning:
 
-- **Extended Thinking Models:** Claude 3.7 Sonnet Thinking, OpenAI o1 / o3-mini, Gemini 2.0 Flash Thinking, DeepSeek R1.
-- **Direct Providers:** Anthropic, OpenAI, Google GenAI, Vertex AI, Azure OpenAI, Groq, DeepSeek, Together AI, Fireworks AI, Mistral, NVIDIA NIM, Perplexity, Cohere, IBM watsonx, HuggingFace, LiteLLM, xAI, Baseten.
-- **Local Offline Inference:** Ollama (`ops -M ollama:llama3.3`).
+- **Extended Thinking:** Claude 3.7 Sonnet Thinking, OpenAI o1 / o3-mini, Gemini 2.0 Flash Thinking, DeepSeek R1
+- **Direct Providers:** Anthropic, OpenAI, Google GenAI, Vertex AI, Azure OpenAI, Groq, DeepSeek, Together AI, Fireworks AI, Mistral, NVIDIA NIM, Perplexity, Cohere, IBM watsonx, HuggingFace, LiteLLM, xAI, Baseten
+- **Local / Offline:** Ollama (`ops -M ollama:llama3.3`)
 
 ---
 
-## 🎯 Autonomous CI/CD Rubric Evaluation Loops
+## 🎯 CI/CD Rubric Grading
 
-In automated pipelines, OpsCode pairs a worker agent with a dedicated grader model to iteratively self-correct code against a strict specification:
+When running in automated pipelines, OpsCode can pair a worker agent with a dedicated grader model. The grader checks the output against your spec and feeds back specific failures until everything passes (or you hit the iteration limit):
 
 ```bash
 opscode -n "Author a production Kubernetes deployment for an API service" \
@@ -297,37 +330,37 @@ opscode -n "Author a production Kubernetes deployment for an API service" \
 
 ---
 
-## 🚫 Not For You If... (Anti-Marketing & Honesty)
+## 🚫 Not For You If...
 
-To build long-term engineering trust, we are explicit about what OpsCode is **not** designed to do:
+We'd rather be upfront about what OpsCode isn't:
 
-- ❌ **It is not a replacement for human code review:** All infrastructure modifications must be audited by qualified platform engineers before production deployment.
-- ❌ **It is not an unmonitored deployment bot:** OpsCode produces audited plans and diffs. It does not run un-sandboxed `terraform apply -auto-approve` on live production environments.
-- ❌ **It is not for users with zero IaC knowledge:** Safely reviewing and approving agent-generated diffs requires understanding core cloud and networking fundamentals.
+- ❌ **Not a replacement for code review.** Every infrastructure change should still be reviewed by a qualified engineer before it hits production.
+- ❌ **Not an unmonitored deploy bot.** OpsCode produces diffs and plans. It doesn't blindly run `terraform apply -auto-approve` on your live environment.
+- ❌ **Not for zero-IaC-knowledge users.** You need to understand Terraform, Kubernetes, or Ansible basics to meaningfully review what the agent proposes. If you can't read the diff, you shouldn't approve it.
 
 ---
 
-## 📖 Documentation Index
+## 📖 Documentation
 
-Comprehensive technical documentation is maintained in [`docs/opscode-docs/`](docs/opscode-docs/):
+Full docs live in [`docs/opscode-docs/`](docs/opscode-docs/):
 
 | Guide | Topic |
 |---|---|
-| 📄 **[Overview](docs/opscode-docs/overview.md)** | Full platform capabilities, tools inventory, and data paths |
-| 🚀 **[Quickstart](docs/opscode-docs/quickstart.md)** | Getting started, interactive TUI, piping, and LangSmith tracing |
-| 💻 **[CLI Reference](docs/opscode-docs/cli-reference.md)** | Complete CLI flags, subcommands (`config`, `auth`, `plugin`, etc.), and slash commands |
-| ⚙️ **[Configuration](docs/opscode-docs/Configuration.md)** | Environment variables, `.opscode` directories, and precedence order |
-| 📝 **[config.toml Reference](docs/opscode-docs/config.toml.md)** | Complete configuration schema for models, UI, tools, and permissions |
-| 🔑 **[Provider Credentials](docs/opscode-docs/credentials.md)** | Credential setup, `/auth` manager, and provider resolution order |
-| 🛡️ **[Approval Modes & Security](docs/opscode-docs/approval-mode.md)** | Manual/Auto/YOLO modes, shell allowlists, and Unicode/SSRF guardrails |
-| 🤖 **[Subagents](docs/opscode-docs/subagents.md)** | 6 built-in subagents, 34 domain skills, and `BranchMemoryStore` |
-| 🧠 **[Memory and Skills](docs/opscode-docs/memory-and-skills.md)** | 7-tier resolution hierarchy, 4 root global skills, and `remember` workflow |
-| 🔌 **[MCP Tools](docs/opscode-docs/mcp-tools.md)** | Model Context Protocol integration, schemas, and `HeadlessMCPGuard` |
-| 📦 **[Plugins & Marketplaces](docs/opscode-docs/plugins.md)** | Plugin protocol, marketplace commands, and agent vs non-agent bifurcation |
-| 🪝 **[Hooks](docs/opscode-docs/hooks.md)** | Event hooks via `hooks.json`, wire tool mapping, and audit logging |
-| 🤖 **[Model Providers](docs/opscode-docs/model-providers.md)** | 20+ supported providers, extended thinking tokens, and Ollama |
-| 🎯 **[Goals & Rubrics](docs/opscode-docs/goal-and-rubrics.md)** | Interactive acceptance goals vs autonomous CI/CD rubric grading loops |
-| ☁️ **[Remote Sandboxes](docs/opscode-docs/remote-sandboxes.md)** | Ephemeral cloud sandboxes (AgentCore, Daytona, Modal, Runloop, Vercel) |
+| 📄 **[Overview](docs/opscode-docs/overview.md)** | What OpsCode can do, core tools, and data paths |
+| 🚀 **[Quickstart](docs/opscode-docs/quickstart.md)** | Install, launch the TUI, and run your first task |
+| 💻 **[CLI Reference](docs/opscode-docs/cli-reference.md)** | All CLI flags, subcommands, and slash commands |
+| ⚙️ **[Configuration](docs/opscode-docs/Configuration.md)** | Environment variables, `.opscode` directories, and settings |
+| 📝 **[config.toml Reference](docs/opscode-docs/config.toml.md)** | Full config file schema — models, UI, tools, permissions |
+| 🔑 **[Provider Credentials](docs/opscode-docs/credentials.md)** | Set up API keys using `/auth` or environment variables |
+| 🛡️ **[Approval Modes & Security](docs/opscode-docs/approval-mode.md)** | Manual, Auto, and YOLO modes with shell allowlists |
+| 🤖 **[Subagents](docs/opscode-docs/subagents.md)** | Built-in and custom subagents with isolated memory |
+| 🧠 **[Memory & Skills](docs/opscode-docs/memory-and-skills.md)** | Persistent memory, reusable skills, and the `remember` command |
+| 🔌 **[MCP Tools](docs/opscode-docs/mcp-tools.md)** | Add external tools via Model Context Protocol |
+| 📦 **[Plugins & Marketplace](docs/opscode-docs/plugins.md)** | Install and create plugins, manage marketplaces |
+| 🪝 **[Hooks](docs/opscode-docs/hooks.md)** | Run custom logic before or after tool execution |
+| 🤖 **[Model Providers](docs/opscode-docs/model-providers.md)** | 20+ supported providers, extended thinking, and Ollama |
+| 🎯 **[Goals & Rubrics](docs/opscode-docs/goal-and-rubrics.md)** | Set goals interactively or grade work in CI/CD |
+| ☁️ **[Remote Sandboxes](docs/opscode-docs/remote-sandboxes.md)** | Run in ephemeral cloud sandboxes instead of locally |
 
 ---
 
@@ -338,7 +371,7 @@ Comprehensive technical documentation is maintained in [`docs/opscode-docs/`](do
 opscode [OPTIONS] [PROMPT]
 ops [OPTIONS] [PROMPT]
 
-# Common Subcommands
+# Subcommands
 ops auth list | set <provider> | remove <provider>
 ops config show | list | get <key> | set <key> <value>
 ops plugin list | install <id> | uninstall <id> | marketplace add <url>
@@ -348,16 +381,16 @@ ops threads list | delete <id>
 ops agents list | reset --agent <name>
 ops doctor
 
-# Essential Flags
--n, --non-interactive TEXT       # Run single task headlessly
--r, --resume [ID]                # Resume previous thread
+# Key Flags
+-n, --non-interactive TEXT       # Run a single task headlessly
+-r, --resume [ID]                # Resume a previous thread
 -M, --model MODEL                # Model specifier (provider:model)
--a, --agent NAME                 # Launch with specific subagent
--s, --skill NAME                 # Pre-load specific skill
--y, --auto-approve               # Classifier-backed Auto mode
---yolo                           # YOLO mode (all actions permitted)
+-a, --agent NAME                 # Launch with a specific subagent
+-s, --skill NAME                 # Pre-load a specific skill
+-y, --auto-approve               # Auto mode (classifier-backed)
+--yolo                           # YOLO mode (everything auto-approved)
 -S, --shell-allow-list LIST      # Shell allowlist (recommended, all, CSV)
---goal TEXT                      # Interactive goal with criteria
+--goal TEXT                      # Interactive goal with acceptance criteria
 --rubric TEXT|@PATH              # Autonomous rubric grading loop
 --rubric-model MODEL             # Grader model for rubric evaluation
 --sandbox [TYPE]                 # Ephemeral cloud sandbox provider
@@ -365,21 +398,15 @@ ops doctor
 
 ---
 
-## 🤝 Contributing & Community
+## 🤝 Contributing
 
-We welcome community contributions! Please review our [Contributing Guidelines](CONTRIBUTING.md) and [Security Policy](SECURITY.md) before submitting pull requests.
+We'd love your help. Check out our [Contributing Guidelines](CONTRIBUTING.md) and [Security Policy](SECURITY.md) before opening a PR.
 
 ```bash
-# Clone the repository
 git clone https://github.com/talkops-ai/opscode.git
 cd opscode
-
-# Create a virtual environment and install dev dependencies
-uv venv
-source .venv/bin/activate
+uv venv && source .venv/bin/activate
 uv pip install -e ".[dev,test-integration]"
-
-# Run the test suite
 uv run pytest tests/ -m unit -v
 ```
 
@@ -387,4 +414,4 @@ uv run pytest tests/ -m unit -v
 
 ## 📄 License
 
-OpsCode is open-source software licensed under the [Apache License 2.0](LICENSE).
+OpsCode is open-source under the [Apache License 2.0](LICENSE).

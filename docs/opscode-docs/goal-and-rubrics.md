@@ -1,60 +1,57 @@
-# Goals and Rubrics
+# Goals and rubrics
 
-> Define measurable objectives with goals in interactive sessions, or enforce deterministic acceptance criteria with self-evaluation rubric loops in automated workflows.
+> Set goals interactively or grade work automatically in CI/CD
 
-OpsCode provides two complementary evaluation frameworks:
-1. **Interactive Goals (`--goal` / `/goal`):** Deconstructs high-level objectives into structured acceptance criteria and tracks interactive progress.
-2. **Self-Evaluating Rubrics (`--rubric`):** Employs an autonomous grading loop in non-interactive mode where a dedicated grader model inspects agent outputs against a rubric until all criteria pass.
+OpsCode gives you two ways to set expectations for the agent's work:
 
----
+- **Goals** — For interactive sessions. OpsCode generates a checklist of acceptance criteria and tracks progress in the TUI as you work together.
+- **Rubrics** — For automated CI/CD. A dedicated grader model evaluates the agent's output against your criteria and feeds back failures until everything passes.
 
-## Interactive Goals
+## Goals
 
-Goals are designed for **interactive exploratory sessions**. OpsCode generates a live checklist of acceptance criteria that are evaluated dynamically throughout the turn execution loop.
+Goals work best in **interactive sessions** where you're working alongside the agent. OpsCode breaks your objective into acceptance criteria and tracks each one in real-time.
 
-### Using goals
+### Set a goal
 
-From the CLI at startup:
+At launch:
 
 ```bash
-opscode --goal "Harden the production EKS cluster with Pod Security Standards and NetworkPolicies"
+ops --goal "Harden the production EKS cluster with Pod Security Standards and NetworkPolicies"
 ```
 
-Or inside an active interactive session:
+Or inside a session:
 
 ```
 /goal Implement AWS KMS state encryption and cross-account IAM roles for OpenTofu
 ```
 
-### Architecture & execution flow
+### How it works
 
-1. **Criteria Generation (`GoalCriteriaMiddleware`):** A criteria agent analyzes the repository workspace and generates clear, verifiable acceptance criteria.
-2. **Visual Progress Tracking (`GoalStateNoticeMiddleware` & `GoalReviewWidget`):** A dedicated TUI panel displays criteria status in real-time (`[pending]`, `[passed]`, `[failed]`).
-3. **Goal State Tools:** The agent inspects and updates criteria progress via native tools (`get_goal`, `update_goal`).
+1. OpsCode analyzes your workspace and generates verifiable acceptance criteria.
+2. A panel in the TUI shows criteria status in real-time: `[pending]`, `[passed]`, `[failed]`.
+3. The agent uses built-in tools (`get_goal`, `update_goal`) to inspect and update progress.
 
----
+## Rubrics
 
-## Self-Evaluating Rubrics
+Rubrics provide autonomous quality assurance for **non-interactive and CI/CD** workflows. The agent does the work, a grader model checks the results, and if anything fails, the agent iterates on fixes automatically.
 
-Rubrics provide autonomous quality assurance for **non-interactive (`-n`) and CI/CD automation**. OpsCode executes the task, invokes a grader model to verify criteria, and loops automatically to fix any deficiencies.
-
-### Using rubrics
+### Set a rubric
 
 ```bash
-opscode -n "Author a Terraform module for an AWS RDS Aurora Postgres cluster" \
+ops -n "Author a Terraform module for an AWS RDS Aurora Postgres cluster" \
   --rubric "1. Multi-AZ deployment is enabled.
 2. Storage is encrypted with AWS KMS customer managed key.
 3. Automated backups are retained for 14 days.
 4. Enhanced monitoring and Performance Insights are enabled.
-5. Security group restricts database port 5432 to VPC CIDR only."
+5. Security group restricts port 5432 to VPC CIDR only."
 ```
 
-### Rubric from a file
+### Load from a file
 
-For complex specifications, load criteria from a file using `@path`:
+For complex specs, load criteria from a file using `@path`:
 
 ```bash
-opscode -n "Refactor VPC networking" --rubric @specs/vpc-rubric.md
+ops -n "Refactor VPC networking" --rubric @specs/vpc-rubric.md
 ```
 
 **`specs/vpc-rubric.md`:**
@@ -62,71 +59,59 @@ opscode -n "Refactor VPC networking" --rubric @specs/vpc-rubric.md
 # VPC Architecture Rubric
 
 1. Primary CIDR block is 10.100.0.0/16 with 3 public and 3 private subnets across 3 AZs.
-2. NAT Gateways are deployed across all 3 availability zones for high availability.
-3. Flow logs are configured to publish to an encrypted CloudWatch Log Group.
+2. NAT Gateways are deployed across all 3 availability zones.
+3. Flow logs publish to an encrypted CloudWatch Log Group.
 4. Default security group denies all inbound and outbound traffic.
 5. VPC endpoints are provisioned for S3 and DynamoDB.
 ```
 
-### Rubric CLI options
+### Rubric options
 
-| Flag | Description |
+| Flag | What it does |
 |---|---|
-| `--rubric TEXT\|@PATH` | Acceptance criteria string or `@path` to a markdown file |
-| `--rubric-model MODEL` | Dedicated grader model for evaluation (e.g. `--rubric-model openai:gpt-4.1`) |
-| `--rubric-max-iterations N` | Maximum self-correction iteration loops before completing |
+| `--rubric TEXT\|@PATH` | Acceptance criteria (inline text or `@path` to a file) |
+| `--rubric-model MODEL` | Dedicated grader model (e.g. `--rubric-model openai:gpt-4.1`) |
+| `--rubric-max-iterations N` | Maximum fix-and-recheck cycles |
 
-### Grader loop architecture (`ReliableRubricMiddleware`)
+### How the grading loop works
 
-```
-┌────────────────────────────────────────────────────────┐
-│                   Rubric Evaluation Loop               │
-├────────────────────────────────────────────────────────┤
-│ 1. Worker Agent completes initial task execution       │
-│ 2. Grader Model evaluates work tree against rubric     │
-│ 3. If all criteria PASS ──> Return final success       │
-│ 4. If any criteria FAIL ──> Grader feeds back specific │
-│    deficiency report into Worker Agent context         │
-│ 5. Worker iterates on fixes and re-submits to Grader   │
-│ 6. Repeats until PASS or max iterations reached        │
-└────────────────────────────────────────────────────────┘
-```
+1. The worker agent completes the initial task.
+2. The grader model evaluates the work against the rubric.
+3. If all criteria pass → done.
+4. If anything fails → the grader sends a specific deficiency report back to the worker.
+5. The worker fixes the issues and resubmits.
+6. This repeats until everything passes or the iteration limit is reached.
 
-Using a separate grader model (e.g., grading an Anthropic worker with OpenAI GPT-4.1 or vice versa) avoids self-evaluation bias and catches subtle edge cases.
+Using a separate grader model (e.g., grading an Anthropic worker with OpenAI GPT-4.1) avoids self-evaluation bias and catches edge cases.
 
----
+## Goals vs. rubrics
 
-## Goals vs. Rubrics Comparison
-
-| Feature | Goals | Rubrics |
+| | Goals | Rubrics |
 |---|---|---|
-| **Primary Mode** | Interactive TUI | Non-interactive (`-n`) / CI/CD |
-| **Criteria Source** | Auto-generated from objective | User-defined or specification file |
-| **Iteration Loop** | Human-guided with real-time UI checklist | Fully autonomous self-correction loop |
-| **Middleware** | `GoalCriteriaMiddleware`, `GoalStateNoticeMiddleware` | `ReliableRubricMiddleware` |
-| **Grader Model** | Interactive model | Dedicated grader (`--rubric-model`) |
-| **CLI Flag** | `--goal TEXT` | `--rubric TEXT\|@PATH` |
+| **Best for** | Interactive sessions | CI/CD and automation |
+| **Criteria** | Auto-generated from your objective | You define them |
+| **Iteration** | You guide the agent with real-time feedback | Fully autonomous fix-and-recheck loop |
+| **Grader** | Same model | Dedicated model (optional) |
+| **CLI flag** | `--goal TEXT` | `--rubric TEXT\|@PATH` |
 
----
+## CI/CD examples
 
-## DevOps CI/CD examples
-
-### Automated Kubernetes manifest verification
+### Kubernetes manifest verification
 
 ```bash
-opscode -n "Audit and fix deployment.yaml" \
+ops -n "Audit and fix deployment.yaml" \
   --rubric "1. Non-root security context is configured.
 2. Read-only root filesystem is enabled.
-3. Liveness and readiness probes have timeout and failure thresholds.
+3. Liveness and readiness probes have timeout thresholds.
 4. CPU/memory limits and requests are defined." \
   --rubric-max-iterations 3 \
   --quiet
 ```
 
-### Automated GitHub Actions workflow generation
+### GitHub Actions workflow generation
 
 ```bash
-opscode -n "Create a release pipeline workflow" \
+ops -n "Create a release pipeline workflow" \
   --rubric @specs/gha-rubric.md \
   --rubric-model "anthropic:claude-opus-4-7" \
   --max-turns 15

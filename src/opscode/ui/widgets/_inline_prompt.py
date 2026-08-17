@@ -278,7 +278,7 @@ def apply_inline_prompt_border(widget: Widget) -> None:
     """
     if is_ascii_mode():
         colors = theme.get_theme_colors(widget)
-        widget.styles.border = ("ascii", colors.success)
+        widget.styles.border = ("ascii", colors.primary)
 
 
 def stop_inline_prompt_blur(event: events.Blur) -> None:

@@ -1,41 +1,12 @@
-# Model Context Protocol (MCP) Tools
+# MCP tools
 
-> Connect OpsCode to external tools and context providers using the Model Context Protocol.
+> Connect OpsCode to external tools using the Model Context Protocol
 
-OpsCode provides native support for the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). MCP allows you to connect external tool providers — Kubernetes cluster inspectors, Terraform registries, AWS API proxies, GitHub APIs, and database query servers — directly into the agent's tool execution graph without custom coding.
+OpsCode supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). MCP lets you connect external tool providers — Kubernetes cluster inspectors, Terraform registries, AWS APIs, database servers — directly into the agent without writing custom code.
 
----
+## Add an MCP server
 
-## Configuration
-
-MCP servers are configured in JSON manifests. OpsCode resolves configuration files in the following precedence order:
-
-### 1. Explicit CLI flag (highest priority)
-
-```bash
-opscode --mcp-config path/to/mcp.json
-```
-
-### 2. Project-level manifests (Git-tracked or project-scoped)
-
-Checked in order (first found wins):
-
-```
-.mcp.json
-mcp.json
-.opscode/.mcp.json
-.opscode/mcp.json
-```
-
-### 3. Global user manifest
-
-```
-~/.opscode/.mcp.json
-```
-
----
-
-## Configuration schema
+MCP servers are configured in JSON files. Create an `.mcp.json` in your project root or in `~/.opscode/`:
 
 ```json
 {
@@ -61,75 +32,60 @@ mcp.json
 
 Each server entry defines:
 
-| Field | Type | Description |
+| Field | Type | What it does |
 |---|---|---|
-| `command` | string | Executable binary to launch (`npx`, `python`, `uvx`, `docker`) |
-| `args` | list[string] | Command-line arguments passed to the server |
-| `env` | object | Environment variables injected into the server subprocess |
+| `command` | string | Executable to launch (`npx`, `python`, `uvx`, `docker`) |
+| `args` | list | Arguments passed to the server |
+| `env` | object | Environment variables for the server process |
 
----
+## Where to put the config
 
-## Tool discovery & naming convention
+OpsCode checks for MCP configs in this order (first found wins):
 
-On startup, OpsCode:
+1. **CLI flag** (highest priority): `ops --mcp-config path/to/mcp.json`
+2. **Project-level**: `.mcp.json`, `mcp.json`, `.opscode/.mcp.json`, or `.opscode/mcp.json`
+3. **User-level**: `~/.opscode/.mcp.json`
 
-1. Discovers and parses configured MCP manifests.
-2. Spawns each MCP server as an isolated subprocess over stdio.
-3. Queries server capabilities and tool schemas via MCP handshake.
-4. Registers tools dynamically into the agent's runtime tool registry.
+## How tools are named
 
-### Naming convention
-
-MCP tools are registered into OpsCode with standard namespacing:
+When OpsCode starts, it launches each configured MCP server, discovers its tools, and registers them with a namespaced name:
 
 ```
 mcp__{server}__{tool}
 ```
 
-For example, a tool `get_pods` provided by server `kubernetes` is registered as:
+For example, a tool `get_pods` from server `kubernetes` becomes `mcp__kubernetes__get_pods`.
 
-```
-mcp__kubernetes__get_pods
-```
+Use `/mcp` inside a session to inspect loaded servers, tools, and their schemas.
 
-This namespace format is used throughout OpsCode for slash commands, tool approval modals, and [hooks](./hooks.md) event listeners.
+## Trust and security
 
-Use `/mcp` inside an interactive session to inspect loaded servers, tools, and schemas.
+### Global vs. project trust
 
----
+- **Global servers** (`~/.opscode/.mcp.json`) are always trusted — you control them.
+- **Project servers** (`.opscode/.mcp.json`, `.mcp.json`) require confirmation on first use since they can be committed to Git by other contributors. OpsCode remembers your trust decisions.
 
-## Security & trust model
-
-### Global vs. Project trust
-
-- **Global MCP Servers (`~/.opscode/.mcp.json`):** Always trusted because they are directly controlled by the local user.
-- **Project MCP Servers (`.opscode/.mcp.json`, `.mcp.json`):** Require explicit user confirmation on first encounter since they can be checked into Git repositories by other contributors. Trust decisions are persisted in `~/.opscode/.state/mcp_trust.json`.
-
-Override trust prompts for CI/CD or trusted workspaces:
+Override trust for CI/CD:
 
 ```bash
-# Trust project MCP definitions for this session
-opscode --trust-project-mcp
+# Trust project MCP servers for this session
+ops --trust-project-mcp
 
-# Disable all MCP tool loading entirely
-opscode --no-mcp
+# Disable all MCP tools
+ops --no-mcp
 ```
 
-### Headless MCP guard (`HeadlessMCPGuardMiddleware`)
+### Headless safety
 
-When running in non-interactive mode (`-n`) or automated CI/CD pipelines, OpsCode protects environments with a 4-tier tool classification guardrail:
+When running unattended (headless mode or CI/CD), OpsCode automatically classifies each MCP tool into security tiers:
 
-| Security Tier | Policy | Examples |
+| Tier | What happens | Examples |
 |---|---|---|
-| `READ_ONLY` | Allowed automatically | `mcp__k8s__get_pods`, `mcp__aws__describe_instances` |
-| `MUTATING_SAFE` | Gated in automated runs | `mcp__k8s__apply_manifest`, `mcp__aws__tag_resource` |
-| `MUTATING_DESTRUCTIVE` | Blocked without explicit allowlist | `mcp__k8s__delete_namespace`, `mcp__aws__terminate_instances` |
-| `PRIVILEGED` | Blocked in headless mode | Operations modifying cluster RBAC or IAM root permissions |
+| **Read-only** | Runs automatically | `mcp__k8s__get_pods`, `mcp__aws__describe_instances` |
+| **Mutating-safe** | Gated in headless mode | `mcp__k8s__apply_manifest`, `mcp__aws__tag_resource` |
+| **Mutating-destructive** | Blocked without explicit allowlist | `mcp__k8s__delete_namespace`, `mcp__aws__terminate_instances` |
+| **Privileged** | Blocked in headless mode | Operations modifying cluster RBAC or IAM root permissions |
 
----
+## Subagent MCP servers
 
-## Subagent-scoped MCP servers
-
-In addition to global and project MCP servers, individual built-in subagents and plugin subagents (such as `aws-terraform-module-writer`, `aws-opentofu-provisioner`, and `infra-ansible-provisioner`) encapsulate their own `.mcp.json` definitions.
-
-These MCP sessions are instantiated exclusively for the subagent when invoked and do not leak into the parent agent's tool namespace.
+Some built-in subagents (like `aws-terraform-module-writer` and `infra-ansible-provisioner`) bundle their own MCP server configs. These servers start when the subagent is invoked and stop when it finishes — they don't affect the main agent's tools.

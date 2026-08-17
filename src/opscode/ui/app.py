@@ -74,6 +74,7 @@ from opscode.ui.widgets.messages import (
     SystemMessage,
     UserMessage,
 )
+from opscode.ui.widgets.ask_user import AskUserMenu
 from opscode.ui.widgets.notification_center import NotificationCenter
 from opscode.ui.widgets.status import StatusBar
 from opscode.ui.widgets.subagent_panel import SubagentPanel
@@ -205,10 +206,16 @@ class OpsCodeApp(App):
     class ServerReady(Message):
         """Posted by ``_start_server_background`` when the server is healthy."""
 
-        def __init__(self, client: Any, server_proc: Any) -> None:
+        def __init__(
+            self,
+            client: Any,
+            server_proc: Any,
+            mcp_server_info: list | None = None,
+        ) -> None:
             super().__init__()
             self.client = client
             self.server_proc = server_proc
+            self.mcp_server_info = mcp_server_info
 
     class ServerStartFailed(Message):
         """Posted by ``_start_server_background`` on startup failure."""
@@ -234,6 +241,7 @@ class OpsCodeApp(App):
         startup_cmd: str | None = None,
         defer_server_start: bool = False,
         server_kwargs: dict[str, Any] | None = None,
+        mcp_preload_kwargs: dict[str, Any] | None = None,
         mcp_server_info: list | None = None,
     ) -> None:
         super().__init__()
@@ -294,6 +302,7 @@ class OpsCodeApp(App):
         self._pending_goal_review_widget: Any | None = None
         self._pending_goal_review_future: Any | None = None
         self._pending_approval_widget: Any | None = None
+        self._pending_ask_user_widget: AskUserMenu | None = None
         self._approval_placeholder: Any | None = None
 
         # ── Worker Handles ───────────────────────────────
@@ -318,6 +327,7 @@ class OpsCodeApp(App):
 
         # Deferred server startup
         self._server_kwargs = server_kwargs
+        self._mcp_preload_kwargs = mcp_preload_kwargs
         self._server_proc: Any = None
         self._mcp_session_manager: Any | None = None
         self._mcp_server_info = mcp_server_info or []
@@ -405,6 +415,7 @@ class OpsCodeApp(App):
             on_subagent_event=self._on_subagent_event,
             app=self,
             request_approval=self._request_approval,
+            request_ask_user=self._request_ask_user,
         )
 
         self._chat_input = self.query_one("#input-area", ChatInput)
@@ -556,9 +567,9 @@ class OpsCodeApp(App):
         return True
 
     async def _start_server_background(self) -> None:
-        """Background worker: start the LangGraph server subprocess.
+        """Background worker: start the LangGraph server subprocess and preload MCP metadata.
 
-        On success → posts ``ServerReady(client, server_proc)``
+        On success → posts ``ServerReady(client, server_proc, mcp_server_info)``
         On failure → posts ``ServerStartFailed(error)``
         """
         from opscode.cli.server_manager import start_server_and_get_agent
@@ -566,12 +577,43 @@ class OpsCodeApp(App):
         try:
             kwargs = dict(self._server_kwargs or {})
             assistant_id = str(kwargs.pop("assistant_id", self._assistant_id))
-            client, server_proc = await start_server_and_get_agent(
-                assistant_id=assistant_id,
-                **kwargs,
-            )
+
+            coros: list[Any] = [
+                start_server_and_get_agent(
+                    assistant_id=assistant_id,
+                    **kwargs,
+                )
+            ]
+
+            if self._mcp_preload_kwargs is not None and not self._mcp_preload_kwargs.get("no_mcp"):
+                from opscode.mcp.preload import preload_mcp_server_info
+
+                coros.append(preload_mcp_server_info(**self._mcp_preload_kwargs))
+
+            results = await asyncio.gather(*coros, return_exceptions=True)
+
+            server_result = results[0]
+            if isinstance(server_result, BaseException):
+                raise server_result
+
+            client, server_proc = server_result
             self._server_proc = server_proc
-            self.post_message(self.ServerReady(client=client, server_proc=server_proc))
+
+            mcp_info = None
+            if len(results) > 1:
+                mcp_res = results[1]
+                if isinstance(mcp_res, list):
+                    mcp_info = mcp_res
+                elif isinstance(mcp_res, BaseException):
+                    logger.warning("MCP metadata preload background failed: %s", mcp_res)
+
+            self.post_message(
+                self.ServerReady(
+                    client=client,
+                    server_proc=server_proc,
+                    mcp_server_info=mcp_info,
+                )
+            )
         except Exception as exc:
             logger.exception("Server startup failed: %s", exc)
             self.post_message(self.ServerStartFailed(error=exc))
@@ -581,6 +623,8 @@ class OpsCodeApp(App):
         """Handle successful background server startup."""
         self._client = event.client
         self._server_proc = event.server_proc
+        if event.mcp_server_info is not None:
+            self._mcp_server_info = event.mcp_server_info
 
         # Bind the now-live client to the adapter
         if self._adapter:
@@ -2936,6 +2980,86 @@ class OpsCodeApp(App):
         if self._adapter:
             approved = decision.get("type") in {"approve", "auto_approve_all"}
             self._adapter.submit_approval(event.call_id, approved)
+
+    # ── Ask User Interrupt Handling ──────────────────────
+
+    async def _request_ask_user(
+        self,
+        questions: list[Any],
+    ) -> asyncio.Future[Any]:
+        """Mount the interactive AskUserMenu widget and return a Future awaiting response."""
+        loop = asyncio.get_running_loop()
+        result_future: asyncio.Future[Any] = loop.create_future()
+
+        # Clean up any stale ask_user widget
+        if self._pending_ask_user_widget is not None:
+            try:
+                self._pending_ask_user_widget.remove()
+            except Exception:
+                pass
+            self._pending_ask_user_widget = None
+
+        unique_id = f"ask-user-{uuid.uuid4().hex[:8]}"
+        menu = AskUserMenu(questions, id=unique_id)
+        menu.set_future(result_future)
+        self._pending_ask_user_widget = menu
+
+        # Mount widget into messages container (inline with chat)
+        try:
+            messages = self.query_one("#messages", MessageList)
+            res = (
+                messages.mount_inline_prompt(menu)
+                if hasattr(messages, "mount_inline_prompt")
+                else messages.mount(menu)
+            )
+            if inspect.isawaitable(res):
+                await res
+            self.call_after_refresh(menu.scroll_visible)
+            self.call_after_refresh(menu.focus_active)
+        except Exception as exc:
+            logger.exception("Failed to mount AskUserMenu widget: %s", exc)
+            self._pending_ask_user_widget = None
+            if not result_future.done():
+                result_future.set_result({"type": "cancelled"})
+            return result_future
+
+        return result_future
+
+    @on(AskUserMenu.Answered)
+    async def _on_ask_user_menu_answered(self, event: AskUserMenu.Answered) -> None:
+        """Handle ask_user menu answers - remove widget and refocus input."""
+        await self._finish_ask_user_prompt(context="answered")
+
+    @on(AskUserMenu.Cancelled)
+    async def _on_ask_user_menu_cancelled(self, event: AskUserMenu.Cancelled) -> None:
+        """Handle ask_user menu cancellation - remove widget and refocus input."""
+        await self._finish_ask_user_prompt(context="cancelled")
+
+    async def _finish_ask_user_prompt(self, *, context: str = "finished") -> None:
+        """Remove the AskUserMenu widget and return focus to chat input."""
+        if self._pending_ask_user_widget is not None:
+            try:
+                await self._pending_ask_user_widget.remove()
+            except Exception:
+                pass
+            self._pending_ask_user_widget = None
+        self._focus_chat_input_after_refresh()
+
+    async def _cancel_pending_ask_user(self, *, context: str = "cleanup") -> None:
+        """Cancel and remove any mounted pending ask_user prompt."""
+        if self._pending_ask_user_widget is not None:
+            widget = self._pending_ask_user_widget
+            self._pending_ask_user_widget = None
+            try:
+                widget.action_cancel()
+            except Exception:
+                pass
+            if getattr(widget, "is_mounted", False):
+                try:
+                    await widget.remove()
+                except Exception:
+                    pass
+            self._focus_chat_input_after_refresh()
 
     def _is_input_focused(self) -> bool:
         if not hasattr(self, "_chat_input") or not self._chat_input:

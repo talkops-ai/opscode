@@ -110,6 +110,83 @@ class AskUserMenu(Container):
     can_focus = True
     can_focus_children = True
 
+    DEFAULT_CSS = """
+    AskUserMenu {
+        height: auto;
+        margin: 1 0;
+        padding: 0 1;
+        background: $surface;
+        border: solid $primary;
+    }
+    AskUserMenu .ask-user-title {
+        text-style: bold;
+        color: $primary;
+        margin-bottom: 0;
+    }
+    AskUserMenu .ask-user-questions {
+        height: auto;
+        padding: 0 1;
+    }
+    AskUserMenu .ask-user-question {
+        height: auto;
+        margin-bottom: 1;
+    }
+    AskUserMenu .ask-user-question-active {
+        border-left: thick $primary;
+        padding-left: 1;
+    }
+    AskUserMenu .ask-user-question-inactive {
+        opacity: 0.6;
+        padding-left: 2;
+    }
+    AskUserMenu .ask-user-question-text {
+        margin: 0 0 0 1;
+        padding: 0;
+        color: $foreground;
+    }
+    AskUserMenu .ask-user-choice {
+        height: auto;
+        padding: 0 1;
+        color: $foreground;
+    }
+    AskUserMenu .ask-user-choice-selected {
+        color: $primary;
+        text-style: bold;
+    }
+    AskUserMenu .ask-user-text-input {
+        margin: 1 0 0 2;
+        height: auto;
+        min-height: 3;
+        max-height: 10;
+        background: $background;
+        border: solid $panel;
+        padding: 0 1;
+        color: $foreground;
+    }
+    AskUserMenu .ask-user-text-input:focus {
+        border: solid $primary;
+    }
+    AskUserMenu .ask-user-other-input {
+        margin: 1 0 0 2;
+        height: auto;
+        min-height: 3;
+        max-height: 10;
+        background: $background;
+        border: solid $panel;
+        padding: 0 1;
+        color: $foreground;
+    }
+    AskUserMenu .ask-user-other-input:focus {
+        border: solid $primary;
+    }
+    AskUserMenu .ask-user-help {
+        color: $text-muted;
+        text-style: italic;
+        margin-top: 0;
+        margin-bottom: 0;
+    }
+    """
+
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "cancel", "Cancel", show=False),
         Binding("tab", "next_question", "Next question", show=False, priority=True),
@@ -296,6 +373,7 @@ class _ChoiceOption(InlinePromptOption):
             text,
             index,
             selected=selected,
+            selected_class="ask-user-choice-selected",
             classes="ask-user-choice",
             **kwargs,
         )

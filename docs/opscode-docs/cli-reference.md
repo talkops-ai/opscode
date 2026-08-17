@@ -75,7 +75,7 @@ Mutually exclusive:
 
 | Flag | Description |
 |---|---|
-| `-y`, `--auto-approve` | Enable classifier-backed Auto mode (auto-approves safe read-only actions) |
+| `-y`, `--auto-approve` | Enable Auto mode (auto-approves safe read-only actions, asks for mutating ones) |
 | `--yolo` | Run gated actions without review (after risk acknowledgement) |
 
 ### Shell and sandbox
@@ -159,7 +159,7 @@ opscode plugin marketplace list          # List active marketplace sources
 Inspect and manage skills:
 
 ```bash
-opscode skills list          # List all discovered skills across the 7-tier hierarchy
+opscode skills list          # List all discovered skills across all sources
 opscode skills info <name>   # Display details, domain, and description for a skill
 opscode skills find <query>  # Search skills by keyword
 opscode skills create <name> # Scaffolds a new skill directory

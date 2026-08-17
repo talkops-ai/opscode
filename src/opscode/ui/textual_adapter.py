@@ -34,6 +34,7 @@ from opscode.config.settings import get_glyphs
 if TYPE_CHECKING:
     from opscode.ui.widgets.messages import MessageList
     from opscode.ui.widgets.status import StatusBar
+    from opscode.ui.widgets._ask_user_types import AskUserWidgetResult, Question
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +361,7 @@ class TextualAdapter:
         app: Any = None,
         prompt_manager: Any = None,
         request_approval: Callable[..., Any] | None = None,
+        request_ask_user: Callable[..., Any] | None = None,
     ) -> None:
         self._client = client
         self._assistant_id = assistant_id
@@ -371,6 +373,7 @@ class TextualAdapter:
         self._app = app
         self._prompt_manager = prompt_manager
         self._request_approval = request_approval
+        self._request_ask_user = request_ask_user
         self._stats = SessionStats()
         self._cancel_event = asyncio.Event()
         self._active_tools_map: dict[str, str] = {}
@@ -384,6 +387,14 @@ class TextualAdapter:
             return self._request_approval
         if self._app and hasattr(self._app, "_request_approval"):
             return self._app._request_approval
+        return None
+
+    @property
+    def _effective_request_ask_user(self) -> Callable[..., Any] | None:
+        if self._request_ask_user is not None:
+            return self._request_ask_user
+        if self._app and hasattr(self._app, "_request_ask_user"):
+            return self._app._request_ask_user
         return None
 
     @property
@@ -757,12 +768,80 @@ class TextualAdapter:
         self,
         pending_interrupts: dict[str, Any],
     ) -> dict[str, Any]:
-        """Resolve pending HITL interrupts and return the Command resume dict."""
+        """Resolve pending HITL and ask_user interrupts and return the Command resume dict."""
         resume_payload: dict[str, Any] = {}
         req_approval_fn = self._effective_request_approval
+        req_ask_user_fn = self._effective_request_ask_user
 
         for int_id, int_val in list(pending_interrupts.items()):
-            action_requests = int_val.get("action_requests", []) if isinstance(int_val, dict) else []
+            if not isinstance(int_val, dict):
+                continue
+
+            # ── 1. Handle `ask_user` Interactive Question Prompts ───────────
+            if int_val.get("type") == "ask_user" or "questions" in int_val:
+                questions = int_val.get("questions", [])
+
+                if req_ask_user_fn is not None:
+                    try:
+                        if self._set_spinner:
+                            try:
+                                await self._set_spinner(None)
+                            except Exception:
+                                pass
+
+                        res = req_ask_user_fn(questions)
+                        future = await res if inspect.isawaitable(res) else res
+                        widget_result = (
+                            await future
+                            if (inspect.isawaitable(future) or isinstance(future, asyncio.Future))
+                            else future
+                        )
+
+                        if isinstance(widget_result, dict):
+                            result_type = widget_result.get("type")
+                            if result_type == "answered":
+                                answers = widget_result.get("answers", [])
+                                resume_payload[int_id] = {
+                                    "status": "answered",
+                                    "answers": answers if isinstance(answers, list) else [str(answers)],
+                                }
+                            elif result_type == "cancelled":
+                                resume_payload[int_id] = {
+                                    "status": "cancelled",
+                                    "answers": ["(cancelled)" for _ in questions],
+                                }
+                            else:
+                                resume_payload[int_id] = {
+                                    "status": "error",
+                                    "error": str(widget_result.get("error", "invalid widget response")),
+                                    "answers": [],
+                                }
+                        else:
+                            resume_payload[int_id] = {
+                                "status": "error",
+                                "error": "ask_user future returned invalid non-dict result",
+                                "answers": [],
+                            }
+                    except Exception as exc:
+                        logger.exception("Failed to resolve ask_user prompt: %s", exc)
+                        resume_payload[int_id] = {
+                            "status": "error",
+                            "error": f"Failed to display ask_user prompt: {exc}",
+                            "answers": [],
+                        }
+                else:
+                    # Headless or non-interactive fallback
+                    resume_payload[int_id] = {
+                        "status": "cancelled",
+                        "error": "ask_user prompt not supported in non-interactive UI adapter",
+                        "answers": ["(cancelled)" for _ in questions],
+                    }
+                continue
+
+            # ── 2. Handle Tool Action Approvals (HITL) ───────────────────────
+            action_requests = int_val.get("action_requests", [])
+            if not action_requests:
+                continue
 
             if self._auto_approve:
                 decisions = [{"type": "approve"} for _ in action_requests]
@@ -770,8 +849,13 @@ class TextualAdapter:
                 continue
 
             if req_approval_fn is not None:
-                future = await req_approval_fn(action_requests, self._assistant_id)
-                decision = await future
+                res = req_approval_fn(action_requests, self._assistant_id)
+                future = await res if inspect.isawaitable(res) else res
+                decision = (
+                    await future
+                    if (inspect.isawaitable(future) or isinstance(future, asyncio.Future))
+                    else future
+                )
 
                 if (
                     isinstance(decision, dict)

@@ -71,19 +71,15 @@ def run_interactive(
             "recursion_limit": recursion_limit,
         }
 
+    mcp_preload_kwargs: dict[str, Any] | None = None
+    if not no_mcp:
+        mcp_preload_kwargs = {
+            "mcp_config_path": mcp_config_path,
+            "no_mcp": no_mcp,
+            "trust_project_mcp": trust_project_mcp,
+        }
+
     async def _run() -> int:
-        from opscode.mcp.preload import preload_mcp_server_info
-
-        mcp_server_info = None
-        if not no_mcp:
-            try:
-                mcp_server_info = await preload_mcp_server_info(
-                    mcp_config_path=mcp_config_path,
-                    no_mcp=no_mcp,
-                )
-            except Exception:
-                logger.warning("MCP metadata preload failed", exc_info=True)
-
         app = OpsCodeApp(
             assistant_id=assistant_id,
             model=model_spec,
@@ -94,8 +90,8 @@ def run_interactive(
             initial_skill=initial_skill,
             startup_cmd=startup_cmd,
             server_kwargs=server_kwargs,
+            mcp_preload_kwargs=mcp_preload_kwargs,
             defer_server_start=defer_server_start,
-            mcp_server_info=mcp_server_info,
         )
         return_code = 0
         thread_id = None

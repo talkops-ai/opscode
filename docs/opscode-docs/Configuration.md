@@ -137,7 +137,7 @@ These files are machine-managed. Do not edit them manually.
 
 | Path | Purpose |
 |---|---|
-| `sessions.db` | SQLite conversation checkpoints with covering index `idx_opscode_threads_list` |
+| `sessions.db` | Conversation checkpoints and threads |
 | `auth.json` | Credential store (gateway/OpenRouter auth) |
 | `history.jsonl` | Interactive command input history |
 | `recent_models.json` | Recent `/model` selections (up to 10 entries) |
@@ -166,8 +166,8 @@ These files are machine-managed. Do not edit them manually.
 
 | Path | Purpose |
 |---|---|
-| `~/.agents/skills/` | User-level tool-agnostic skills (Tier 4 in resolution hierarchy) |
-| `.agents/skills/` | Project-level tool-agnostic skills (Tier 6 in resolution hierarchy) |
+| `~/.agents/skills/` | User-level tool-agnostic skills (shared across agents) |
+| `.agents/skills/` | Project-level tool-agnostic skills (shared across agents) |
 
 ## Settings precedence summary
 
@@ -176,7 +176,7 @@ These files are machine-managed. Do not edit them manually.
 | **General options** | `OPSCODE_CODE_*` env → canonical env → `config.toml` → default |
 | **Provider API keys** | `OPSCODE_{KEY}` env → canonical env → `~/.opscode/.env` → `/auth` stored |
 | **Provider base URLs** | Stored base URL → env var → default endpoint |
-| **Skills** | 7-tier hierarchy (Built-in → Plugin → User OpsCode → User Agents → Project OpsCode → Project Agents → Claude Experimental) |
+| **Skills** | Built-in → Plugin → User → Project (project overrides all) |
 | **Memory** | Project `.opscode/memory/` → User `~/.opscode/memory/` |
 | **Subagents** | Project `.opscode/agents/` → User `~/.opscode/{agent}/agents/` → Built-in subagents |
 | **MCP servers** | `--mcp-config` → Project `.mcp.json` / `.opscode/.mcp.json` → Global `~/.opscode/.mcp.json` |

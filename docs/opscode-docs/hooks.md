@@ -1,25 +1,21 @@
 # Hooks
 
-> Subscribe external commands and webhooks to agent lifecycle events via `hooks.json`.
+> Run custom logic before or after tool execution via `hooks.json`
 
-Hooks allow you to trigger external scripts, audit logs, and security guardrails in response to OpsCode tool invocations (shell commands, file modifications, MCP calls). Hooks are managed by `ServerHooksMiddleware` and can act both as asynchronous event broadcasters and synchronous pre-execution gates.
+Hooks let you trigger external scripts, audit logs, or security checks whenever OpsCode runs a tool. You can use hooks to log every shell command, send Slack alerts for infrastructure operations, or auto-format files after the agent modifies them.
 
----
+## Configuration
 
-## Configuration files
+Hooks are declared in JSON files at two scopes:
 
-Hooks are declared in JSON manifests across two scopes:
-
-| Location | Scope | Trust Policy |
+| Location | Scope | Trust |
 |---|---|---|
-| `~/.opscode/hooks.json` | Global (all user sessions) | Always trusted |
+| `~/.opscode/hooks.json` | Global (all sessions) | Always trusted |
 | `.opscode/hooks.json` | Project-level | Requires `--trust-project-hooks` or interactive approval |
 
-Both global and project hooks are loaded and executed simultaneously.
+Both global and project hooks run simultaneously.
 
----
-
-## Manifest format
+## Format
 
 ```json
 {
@@ -28,7 +24,7 @@ Both global and project hooks are loaded and executed simultaneously.
       "command": "echo 'Shell: ${input.command}' >> /tmp/opscode-audit.log"
     },
     "Write": {
-      "command": "echo 'File created/overwritten: ${input.file_path}' >> /tmp/opscode-audit.log"
+      "command": "echo 'File created: ${input.file_path}' >> /tmp/opscode-audit.log"
     },
     "Edit": {
       "command": "echo 'File edited: ${input.file_path}' >> /tmp/opscode-audit.log"
@@ -37,27 +33,23 @@ Both global and project hooks are loaded and executed simultaneously.
 }
 ```
 
-Each key corresponds to a **wire tool name**, and the `command` specifies the shell command executed when that tool is invoked.
+Each key is a **tool name**, and `command` is the shell command that runs when that tool is invoked. You can use `${input.field}` to reference the tool's input values.
 
----
+## Tool names
 
-## Tool name mapping
+OpsCode maps its internal tools to these names for hooks:
 
-OpsCode maps internal tool identifiers to standardized wire names:
-
-| Internal Name | Wire Name | Input Fields Available |
+| Tool name | Triggered by | Available input fields |
 |---|---|---|
-| `execute` | `Bash` | `command`, `timeout` |
-| `write_file` | `Write` | `file_path`, `content` |
-| `edit_file` | `Edit` | `file_path`, `old_string`, `new_string`, `replace_all` |
-| `read_file` | `Read` | `file_path`, `offset`, `limit` |
-| `glob` | `Glob` | `pattern`, `path` |
-| `grep` | `Grep` | `pattern`, `path`, `glob`, `output_mode`, `head_limit` |
-| `ls` | `LS` | `path` |
+| `Bash` | Shell commands | `command`, `timeout` |
+| `Write` | File creation/overwrite | `file_path`, `content` |
+| `Edit` | File edits | `file_path`, `old_string`, `new_string`, `replace_all` |
+| `Read` | File reads | `file_path`, `offset`, `limit` |
+| `Glob` | Pattern searches | `pattern`, `path` |
+| `Grep` | Content searches | `pattern`, `path`, `glob`, `output_mode` |
+| `LS` | Directory listing | `path` |
 
-### MCP tool hooks
-
-MCP tools use the standard `mcp__{server}__{tool}` wire identifier:
+MCP tools use their standard `mcp__{server}__{tool}` name:
 
 ```json
 {
@@ -69,13 +61,11 @@ MCP tools use the standard `mcp__{server}__{tool}` wire identifier:
 }
 ```
 
----
+## Examples
 
-## Use cases & examples
+### Audit logging
 
-### 1. Immutable audit logging
-
-Record all terminal executions and file changes to a centralized log:
+Log all shell commands and file changes:
 
 ```json
 {
@@ -93,7 +83,7 @@ Record all terminal executions and file changes to a centralized log:
 }
 ```
 
-### 2. Slack / ChatOps alerts for Terraform plans
+### Slack alerts for infrastructure plans
 
 Notify the team when infrastructure operations are planned:
 
@@ -107,9 +97,9 @@ Notify the team when infrastructure operations are planned:
 }
 ```
 
-### 3. Automated linting & formatting on write
+### Auto-format on save
 
-Automatically trigger formatters after the agent modifies code:
+Automatically format Terraform files after the agent creates or edits them:
 
 ```json
 {
@@ -121,15 +111,12 @@ Automatically trigger formatters after the agent modifies code:
 }
 ```
 
----
-
 ## Trust and security
 
-Project-level hooks (`.opscode/hooks.json`) can execute arbitrary shell commands and require explicit trust authorization:
+Project-level hooks (`.opscode/hooks.json`) can run arbitrary shell commands and require explicit trust:
 
 ```bash
-# Trust project hooks for the current session
-opscode --trust-project-hooks
+ops --trust-project-hooks
 ```
 
-Global hooks (`~/.opscode/hooks.json`) are always trusted as they reside in the user's home directory.
+Global hooks (`~/.opscode/hooks.json`) are always trusted since they're in your home directory.

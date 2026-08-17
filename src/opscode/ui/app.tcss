@@ -246,20 +246,98 @@ SubagentPanel {
     margin: 1 0;
     padding: 0 1;
     background: $surface;
-    border: solid $success;
+    border: solid $primary;
 }
 
 .inline-prompt .inline-prompt-title {
     text-style: bold;
-    color: $success;
+    color: $primary;
     margin-bottom: 0;
 }
 
 .inline-prompt .inline-prompt-help {
-    color: $foreground;
+    color: $text-muted;
     text-style: italic;
     margin-top: 0;
     margin-bottom: 0;
+}
+
+.inline-prompt .inline-prompt-input {
+    & .text-area--cursor-line {
+        background: transparent;
+    }
+
+    & .text-area--cursor-gutter {
+        background: transparent;
+    }
+}
+
+/* ── Ask user widget ─────────────────────────────────── */
+.ask-user-menu .ask-user-questions {
+    height: auto;
+    padding: 0 1;
+}
+
+.ask-user-menu .ask-user-question {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.ask-user-menu .ask-user-question-active {
+    border-left: thick $primary;
+    padding-left: 1;
+}
+
+.ask-user-menu .ask-user-question-inactive {
+    opacity: 0.6;
+    padding-left: 2;
+}
+
+.ask-user-menu .ask-user-question-text {
+    margin: 0 0 0 1;
+    padding: 0;
+    color: $foreground;
+}
+
+.ask-user-menu .ask-user-choice {
+    height: auto;
+    padding: 0 1;
+    color: $foreground;
+}
+
+.ask-user-menu .ask-user-choice-selected {
+    color: $primary;
+    text-style: bold;
+}
+
+.ask-user-menu .ask-user-text-input {
+    margin: 1 0 0 2;
+    height: auto;
+    min-height: 3;
+    max-height: 10;
+    background: $background;
+    border: solid $panel;
+    padding: 0 1;
+    color: $foreground;
+}
+
+.ask-user-menu .ask-user-text-input:focus {
+    border: solid $primary;
+}
+
+.ask-user-menu .ask-user-other-input {
+    margin: 1 0 0 2;
+    height: auto;
+    min-height: 3;
+    max-height: 10;
+    background: $background;
+    border: solid $panel;
+    padding: 0 1;
+    color: $foreground;
+}
+
+.ask-user-menu .ask-user-other-input:focus {
+    border: solid $primary;
 }
 
 .goal-review-menu .goal-review-content {

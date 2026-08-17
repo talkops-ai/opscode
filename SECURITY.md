@@ -1,6 +1,6 @@
 # Security Policy
 
-OpsCode is built for infrastructure and DevOps automation where security, credential safety, and execution boundaries are paramount.
+OpsCode runs shell commands, modifies files, and interacts with cloud infrastructure on your behalf. Security is a first-class concern across every layer of the agent.
 
 ---
 
@@ -13,18 +13,79 @@ OpsCode is built for infrastructure and DevOps automation where security, creden
 
 ---
 
-## 🔒 Security Principles in OpsCode
+## 🔒 How OpsCode protects your environment
 
-OpsCode incorporates multiple defense-in-depth mechanisms:
+### Approval modes
 
-1. **"Produce Diffs, Not Deployments"**: OpsCode generates plans and diffs for interactive approval. It is architecturally restrained from running un-sandboxed `terraform apply` or destructive deletions without human consent.
-2. **3-Tier Approval Safety Engine**:
-   - **Manual Mode**: Requires confirmation for every mutating shell command or file write.
-   - **Auto Mode**: Classifies shell commands with static safety analysis (`security/shell_safety.py`) and only allows safe read-only operations (`ls`, `grep`, `tofu plan`).
-   - **YOLO Mode**: Unrestricted execution requiring explicit initial acknowledgement.
-3. **Unicode Security Scanner**: Analyzes prompts and files to neutralize Trojan Source attacks, bidirectional overrides, and homoglyph substitution.
-4. **SSRF & Cloud Metadata Protection**: Blocks access to `169.254.169.254`, localhost, and private RFC-1918 CIDRs in URL extraction tools.
-5. **Headless MCP Guard**: Categorizes MCP tool invocations into 4 tiers (`READ_ONLY`, `MUTATING_SAFE`, `MUTATING_DESTRUCTIVE`, `PRIVILEGED`).
+Every mutating action (shell commands, file writes, infrastructure operations) goes through an approval gate before execution:
+
+- **Manual mode** (default) — You approve every action individually.
+- **Auto mode** (`-y`) — A safety classifier analyzes each command and auto-approves safe read-only operations (`ls`, `grep`, `terraform validate`). Mutating commands still require your approval.
+- **YOLO mode** — Unrestricted execution after explicit risk acknowledgement. Designed for trusted sandbox environments.
+
+Use `Shift+Tab` to cycle between modes in a session, or see [Approval Modes](docs/opscode-docs/approval-mode.md).
+
+### Shell command safety
+
+OpsCode statically analyzes every shell command before execution:
+
+- **Dangerous patterns blocked** — Commands containing `rm -rf /`, pipe to `sh`, `curl | bash`, `dd if=`, and other destructive patterns are flagged and require explicit approval.
+- **DevOps-aware classification** — Infrastructure commands are categorized as safe (`kubectl get`, `terraform plan`, `helm lint`) or destructive (`kubectl delete`, `terraform destroy`, `helm uninstall`) with appropriate gating.
+
+### MCP tool security
+
+When running unattended (headless mode or CI/CD), MCP tool calls are classified into security tiers:
+
+| Tier | Policy |
+|---|---|
+| **Read-only** | Runs automatically |
+| **Mutating-safe** | Gated in headless mode |
+| **Mutating-destructive** | Blocked without explicit allowlist |
+| **Privileged** | Blocked in headless mode |
+
+### Unicode and prompt injection defense
+
+OpsCode scans prompts, file contents, and tool inputs for:
+
+- **Trojan Source attacks** — Bidirectional Unicode overrides that make code appear different from what's executed.
+- **Homoglyph substitution** — Characters that look identical but have different Unicode codepoints.
+- **Invisible control characters** — Zero-width joiners, right-to-left marks, and other invisible characters that can alter execution flow.
+
+Detected issues are surfaced with detailed warnings before any action proceeds.
+
+### SSRF and cloud metadata protection
+
+URL extraction and web fetch tools validate all targets:
+
+- Blocks access to cloud metadata endpoints (`169.254.169.254`).
+- Blocks localhost, loopback, and private RFC-1918 addresses.
+- Only allows `http` and `https` schemes.
+- Resolves DNS before connecting and validates the resolved IP is public and globally routable.
+
+### Credential safety
+
+- **`.env` file isolation** — System-critical environment variables (`PATH`, `HOME`, `PYTHONPATH`, `LD_PRELOAD`, `SSH_AUTH_SOCK`, etc.) are blocked from being set via `.env` files to prevent environment hijacking.
+- **API key masking** — API keys are never logged or displayed in output. The `/auth` manager stores credentials in `~/.opscode/.env` with restricted file permissions.
+- **DevOps environment preservation** — Cloud credentials (`KUBECONFIG`, `AWS_PROFILE`, `GOOGLE_APPLICATION_CREDENTIALS`) are isolated and preserved across tool executions.
+
+### Plugin and skill trust
+
+- **Project MCP servers** — Require explicit approval on first use since they can be committed to Git by other contributors. Trust decisions are persisted so you're only asked once.
+- **Project skills** — New skills from untrusted repositories require approval before activation.
+- **Project hooks** — Require `--trust-project-hooks` or interactive approval since they execute arbitrary shell commands.
+- **Global configs** — Configs in `~/.opscode/` are always trusted since they're in your home directory.
+
+### Subagent isolation
+
+Each subagent runs with:
+
+- **Scoped tools** — Only the tools declared in its definition are available. A Terraform subagent can't access Ansible tools.
+- **Isolated memory** — Intermediate reasoning stays inside the subagent and doesn't leak to other subagents or the main conversation.
+- **Scoped MCP** — Subagent MCP sessions start when the subagent is invoked and stop when it finishes.
+
+### Remote sandboxes
+
+For maximum isolation, run OpsCode inside a [remote sandbox](docs/opscode-docs/remote-sandboxes.md) — all shell commands and file operations execute in an ephemeral cloud container instead of on your workstation.
 
 ---
 
