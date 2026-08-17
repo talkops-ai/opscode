@@ -1,7 +1,7 @@
 [project]
-name = "dcoder"
-version = "0.1.0"
-description = "CLI-first coding agent for DevOps infrastructure-as-code"
+name = "talkops-opscode"
+version = "0.1.2"
+description = "Autonomous CLI-first AI agent for DevOps, SRE, Platform Engineering, and Infrastructure as Code"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -60,18 +60,27 @@ test-integration = [
     "langsmith>=0.10.6",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
+    "pytest-cov>=5.0",
+    "agentevals>=0.0.8",
+    "langsmith>=0.10.6",
+]
+
 [project.scripts]
-dcoder = "dcoder.cli.main:cli_main"
+opscode = "opscode.cli.main:cli_main"
+ops = "opscode.cli.main:cli_main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/dcoder"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/dcoder/built_in_skills" = "dcoder/built_in_skills"
+packages = ["src/opscode"]
 
 [tool.pyright]
 include = ["src", "tests"]

@@ -9,21 +9,13 @@ import pytest
 import yaml
 
 
-BUILT_IN_SKILLS_DIR = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "built_in_skills"
+BUILT_IN_SKILLS_DIR = Path(__file__).parent.parent.parent.parent / "src" / "opscode" / "built_in_skills"
 
 EXPECTED_SKILLS = [
-    "ansible",
-    "argocd",
-    "ci-cd",
-    "cloud-aws",
-    "cloud-azure",
-    "cloud-gcp",
+    "cloud-core",
     "docker",
-    "helm",
     "kubernetes",
     "remember",
-    "terraform",
-    "terragrunt",
 ]
 
 
@@ -112,7 +104,7 @@ class TestSkillFrontmatter:
 
 class TestServerConfig:
     def test_generate_langgraph_json(self, tmp_path: Path):
-        from dcoder.server.server import generate_langgraph_json
+        from opscode.server.server import generate_langgraph_json
 
         config_path = generate_langgraph_json(
             tmp_path,
@@ -128,8 +120,8 @@ class TestServerConfig:
         assert config["checkpointer"]["path"] == "./checkpointer.py:create_checkpointer"
 
     def test_server_env_prefix(self):
-        from dcoder.server import SERVER_ENV_PREFIX
-        assert SERVER_ENV_PREFIX == "DCODER_SERVER_"
+        from opscode.server import SERVER_ENV_PREFIX
+        assert SERVER_ENV_PREFIX == "OPSCODE_SERVER_"
 
 
 # ── Integrations Package ────────────────────────────────
@@ -138,7 +130,7 @@ class TestServerConfig:
 class TestIntegrationsPackage:
     def test_imports(self):
         """Verify all public APIs are importable."""
-        from dcoder.integrations import (
+        from opscode.integrations import (
             EventBus,
             ExternalEvent,
             dispatch_hook,
@@ -147,7 +139,7 @@ class TestIntegrationsPackage:
         )
 
     def test_hook_event_constants(self):
-        from dcoder.integrations.hooks import ALL_KNOWN_EVENTS, STANDARD_EVENTS, DEVOPS_EVENTS
+        from opscode.integrations.hooks import ALL_KNOWN_EVENTS, STANDARD_EVENTS, DEVOPS_EVENTS
         assert "session.start" in STANDARD_EVENTS
         assert "terraform.plan" in DEVOPS_EVENTS
         assert STANDARD_EVENTS | DEVOPS_EVENTS == ALL_KNOWN_EVENTS

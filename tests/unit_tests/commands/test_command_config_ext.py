@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from dcoder.commands._base import CommandContext
+from opscode.commands._base import CommandContext
 
 
 # ── Helper ──────────────────────────────────────────────
 
 def _make_ctx(args: str = "", raw: str = "", **overrides):
     mock_settings = MagicMock()
-    mock_settings.config_path = Path.home() / ".dcoder" / "config.toml"
+    mock_settings.config_path = Path.home() / ".opscode" / "config.toml"
     mock_settings.to_display_dict.return_value = {"model_name": "claude-3", "reasoning_effort": "high"}
     mock_settings.project_root = Path("/tmp/project")
     return CommandContext(
@@ -29,7 +29,7 @@ def _make_ctx(args: str = "", raw: str = "", **overrides):
 class TestConfigHandler:
     @pytest.mark.asyncio
     async def test_show_pushes_screen_in_app(self):
-        from dcoder.commands.core.config_cmd import ConfigHandler
+        from opscode.commands.core.config_cmd import ConfigHandler
         mock_app = MagicMock()
         ctx = _make_ctx(args="", raw="/config", app=mock_app)
         res = await ConfigHandler().execute(ctx)
@@ -38,7 +38,7 @@ class TestConfigHandler:
 
     @pytest.mark.asyncio
     async def test_show_cli_displays_settings(self):
-        from dcoder.commands.core.config_cmd import ConfigHandler
+        from opscode.commands.core.config_cmd import ConfigHandler
         ctx = _make_ctx(args="", raw="/config", app=None)
         res = await ConfigHandler().execute(ctx)
         assert res.success
@@ -46,7 +46,7 @@ class TestConfigHandler:
 
     @pytest.mark.asyncio
     async def test_path_shows_location(self):
-        from dcoder.commands.core.config_cmd import ConfigHandler
+        from opscode.commands.core.config_cmd import ConfigHandler
         ctx = _make_ctx(args="path", raw="/config path")
         res = await ConfigHandler().execute(ctx)
         assert res.success
@@ -54,12 +54,12 @@ class TestConfigHandler:
 
     @pytest.mark.asyncio
     async def test_masks_secrets(self):
-        from dcoder.commands.core.config_cmd import ConfigHandler
+        from opscode.commands.core.config_cmd import ConfigHandler
         assert "..." in ConfigHandler._mask_secret("api_key", "sk-1234567890abcdef")
 
     @pytest.mark.asyncio
     async def test_set_valid_key(self):
-        from dcoder.commands.core.config_cmd import ConfigHandler
+        from opscode.commands.core.config_cmd import ConfigHandler
         mock_settings = MagicMock()
         mock_settings.set_field.return_value = (True, "Set key = value")
         ctx = _make_ctx(args="set reasoning_effort high", raw="/config set reasoning_effort high",
@@ -69,7 +69,7 @@ class TestConfigHandler:
 
     @pytest.mark.asyncio
     async def test_reset_valid_key(self):
-        from dcoder.commands.core.config_cmd import ConfigHandler
+        from opscode.commands.core.config_cmd import ConfigHandler
         mock_settings = MagicMock()
         mock_settings.reset_field.return_value = (True, "Reset key to default")
         ctx = _make_ctx(args="reset reasoning_effort", raw="/config reset reasoning_effort",
@@ -80,7 +80,7 @@ class TestConfigHandler:
 
     @pytest.mark.asyncio
     async def test_invalid_subcommand(self):
-        from dcoder.commands.core.config_cmd import ConfigHandler
+        from opscode.commands.core.config_cmd import ConfigHandler
         ctx = _make_ctx(args="garbage", raw="/config garbage")
         res = await ConfigHandler().execute(ctx)
         assert not res.success
@@ -92,7 +92,7 @@ class TestConfigHandler:
 class TestDoctorHandler:
     @pytest.mark.asyncio
     async def test_reports_all_sections(self):
-        from dcoder.commands.core.doctor import DoctorHandler
+        from opscode.commands.core.doctor import DoctorHandler
         mock_app = MagicMock()
         mock_app.get_mcp_servers.return_value = []
         ctx = _make_ctx(raw="/doctor", app=mock_app)
@@ -105,7 +105,7 @@ class TestDoctorHandler:
 
     @pytest.mark.asyncio
     async def test_detects_missing_keys(self):
-        from dcoder.commands.core.doctor import DoctorHandler
+        from opscode.commands.core.doctor import DoctorHandler
         mock_settings = MagicMock()
         mock_settings.openai_api_key = None
         mock_settings.anthropic_api_key = None
@@ -121,9 +121,9 @@ class TestDoctorHandler:
 
     @pytest.mark.asyncio
     async def test_doctor_mcp_connected(self):
-        from dcoder.commands.core.doctor import DoctorHandler
+        from opscode.commands.core.doctor import DoctorHandler
         mock_app = MagicMock()
-        from dcoder.mcp.mcp_info import MCPServerInfo, MCPToolInfo
+        from opscode.mcp.mcp_info import MCPServerInfo, MCPToolInfo
         mock_app.get_mcp_servers.return_value = [
             MCPServerInfo(
                 name="alphavantage",
@@ -144,7 +144,7 @@ class TestDoctorHandler:
 class TestLoginHandler:
     @pytest.mark.asyncio
     async def test_pushes_auth_manager(self):
-        from dcoder.commands.core.auth import LoginHandler
+        from opscode.commands.core.auth import LoginHandler
         mock_app = MagicMock()
         ctx = _make_ctx(raw="/login", app=mock_app)
         res = await LoginHandler().execute(ctx)
@@ -153,7 +153,7 @@ class TestLoginHandler:
 
     @pytest.mark.asyncio
     async def test_login_with_initial_provider(self):
-        from dcoder.commands.core.auth import LoginHandler
+        from opscode.commands.core.auth import LoginHandler
         mock_app = MagicMock()
         ctx = _make_ctx(args="anthropic", raw="/login anthropic", app=mock_app)
         res = await LoginHandler().execute(ctx)
@@ -167,9 +167,9 @@ class TestLoginHandler:
 class TestLogoutHandler:
     @pytest.mark.asyncio
     async def test_clears_credentials(self, tmp_path, monkeypatch):
-        from dcoder.commands.core.auth import LogoutHandler
+        from opscode.commands.core.auth import LogoutHandler
         import os
-        from dcoder.config import paths
+        from opscode.config import paths
         monkeypatch.setattr(paths, "GLOBAL_ENV_PATH", tmp_path / ".env")
         os.environ["ANTHROPIC_API_KEY"] = "test-key"
         ctx = _make_ctx(raw="/logout")
@@ -180,8 +180,8 @@ class TestLogoutHandler:
 
     @pytest.mark.asyncio
     async def test_logout_no_creds(self, monkeypatch):
-        from dcoder.commands.core.auth import LogoutHandler
-        with patch("dcoder.model.config.revoke_provider_credentials", return_value=[]):
+        from opscode.commands.core.auth import LogoutHandler
+        with patch("opscode.model.config.revoke_provider_credentials", return_value=[]):
             ctx = _make_ctx(raw="/logout")
             res = await LogoutHandler().execute(ctx)
             assert res.success
@@ -193,8 +193,8 @@ class TestLogoutHandler:
 class TestPermissionsHandler:
     @pytest.mark.asyncio
     async def test_show_scopes(self):
-        from dcoder.commands.core.permissions import PermissionsHandler
-        from dcoder.ui.permission_store import PermissionStore
+        from opscode.commands.core.permissions import PermissionsHandler
+        from opscode.ui.permission_store import PermissionStore
         mock_app = MagicMock()
         mock_app._permission_store = PermissionStore()
         # bare /permissions with app → pushes modal (mount_as_app_message=False)
@@ -206,8 +206,8 @@ class TestPermissionsHandler:
 
     @pytest.mark.asyncio
     async def test_grant_valid_scope(self):
-        from dcoder.commands.core.permissions import PermissionsHandler
-        from dcoder.ui.permission_store import PermissionStore
+        from opscode.commands.core.permissions import PermissionsHandler
+        from opscode.ui.permission_store import PermissionStore
         mock_app = MagicMock()
         store = PermissionStore()
         mock_app._permission_store = store
@@ -218,8 +218,8 @@ class TestPermissionsHandler:
 
     @pytest.mark.asyncio
     async def test_revoke_valid_scope(self):
-        from dcoder.commands.core.permissions import PermissionsHandler
-        from dcoder.ui.permission_store import PermissionStore
+        from opscode.commands.core.permissions import PermissionsHandler
+        from opscode.ui.permission_store import PermissionStore
         mock_app = MagicMock()
         store = PermissionStore()
         mock_app._permission_store = store
@@ -230,8 +230,8 @@ class TestPermissionsHandler:
 
     @pytest.mark.asyncio
     async def test_permissions_reset(self):
-        from dcoder.commands.core.permissions import PermissionsHandler
-        from dcoder.ui.permission_store import PermissionStore
+        from opscode.commands.core.permissions import PermissionsHandler
+        from opscode.ui.permission_store import PermissionStore
         mock_app = MagicMock()
         store = PermissionStore()
         store.add_rule("allow", "shell:write", source="session")
@@ -244,8 +244,8 @@ class TestPermissionsHandler:
 
     @pytest.mark.asyncio
     async def test_grant_tool_pattern(self):
-        from dcoder.commands.core.permissions import PermissionsHandler
-        from dcoder.ui.permission_store import PermissionStore
+        from opscode.commands.core.permissions import PermissionsHandler
+        from opscode.ui.permission_store import PermissionStore
         mock_app = MagicMock()
         store = PermissionStore()
         mock_app._permission_store = store
@@ -256,8 +256,8 @@ class TestPermissionsHandler:
 
     @pytest.mark.asyncio
     async def test_set_mode(self):
-        from dcoder.commands.core.permissions import PermissionsHandler
-        from dcoder.ui.permission_store import PermissionStore
+        from opscode.commands.core.permissions import PermissionsHandler
+        from opscode.ui.permission_store import PermissionStore
         mock_app = MagicMock()
         store = PermissionStore()
         mock_app._permission_store = store
@@ -274,8 +274,8 @@ class TestPermissionsHandler:
 class TestMcpHandler:
     @pytest.mark.asyncio
     async def test_status_shows_servers(self):
-        from dcoder.commands.core.mcp import McpHandler
-        from dcoder.mcp.mcp_info import MCPServerInfo, MCPToolInfo
+        from opscode.commands.core.mcp import McpHandler
+        from opscode.mcp.mcp_info import MCPServerInfo, MCPToolInfo
         mock_app = MagicMock()
         mock_app.get_mcp_servers.return_value = [
             MCPServerInfo(
@@ -293,7 +293,7 @@ class TestMcpHandler:
 
     @pytest.mark.asyncio
     async def test_no_args_opens_viewer(self):
-        from dcoder.commands.core.mcp import McpHandler
+        from opscode.commands.core.mcp import McpHandler
         mock_app = MagicMock()
         mock_app.get_mcp_servers.return_value = []
         ctx = _make_ctx(args="", raw="/mcp", app=mock_app)
@@ -303,7 +303,7 @@ class TestMcpHandler:
 
     @pytest.mark.asyncio
     async def test_mcp_reconnect(self):
-        from dcoder.commands.core.mcp import McpHandler
+        from opscode.commands.core.mcp import McpHandler
         mock_app = MagicMock()
         mock_app.reconnect_mcp_servers = AsyncMock(return_value=2)
         ctx = _make_ctx(args="reconnect", raw="/mcp reconnect", app=mock_app)
@@ -313,7 +313,7 @@ class TestMcpHandler:
 
     @pytest.mark.asyncio
     async def test_mcp_login(self):
-        from dcoder.commands.core.mcp import McpHandler
+        from opscode.commands.core.mcp import McpHandler
         mock_app = MagicMock()
         ctx = _make_ctx(args="login github", raw="/mcp login github", app=mock_app)
         res = await McpHandler().execute(ctx)
@@ -327,7 +327,7 @@ class TestMcpHandler:
 class TestPluginsHandler:
     @pytest.mark.asyncio
     async def test_no_plugins_available(self):
-        from dcoder.commands.core.plugins import PluginsHandler
+        from opscode.commands.core.plugins import PluginsHandler
         mock_app = MagicMock(spec=[])  # No attributes
         ctx = _make_ctx(raw="/plugins", app=mock_app)
         res = await PluginsHandler().execute(ctx)
@@ -335,7 +335,7 @@ class TestPluginsHandler:
 
     @pytest.mark.asyncio
     async def test_plugins_list_discovered(self):
-        from dcoder.commands.core.plugins import PluginsHandler
+        from opscode.commands.core.plugins import PluginsHandler
         mock_plugin = MagicMock()
         mock_plugin.name = "k8s-plugin"
         mock_plugin.description = "Kubernetes tools"
@@ -356,7 +356,7 @@ class TestSkillsHandler:
     @pytest.mark.asyncio
     @pytest.mark.asyncio
     async def test_empty_state(self):
-        from dcoder.commands.core.skills import SkillsHandler
+        from opscode.commands.core.skills import SkillsHandler
         mock_app = MagicMock(spec=[])  # No tool methods
         ctx = _make_ctx(raw="/skills", app=mock_app)
         res = await SkillsHandler().execute(ctx)
@@ -365,8 +365,8 @@ class TestSkillsHandler:
 
     @pytest.mark.asyncio
     async def test_skills_with_mcp_and_builtin(self):
-        from dcoder.commands.core.skills import SkillsHandler
-        from dcoder.mcp.mcp_info import MCPServerInfo, MCPToolInfo
+        from opscode.commands.core.skills import SkillsHandler
+        from opscode.mcp.mcp_info import MCPServerInfo, MCPToolInfo
         mock_app = MagicMock(spec=["get_active_tools", "get_mcp_servers", "get_discovered_skills"])
         mock_app.get_active_tools.return_value = [{"name": "run_command", "description": "Execute shell"}]
         mock_app.get_mcp_servers.return_value = [

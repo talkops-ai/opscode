@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands.core.fast import FastHandler
+from opscode.commands._base import CommandContext
+from opscode.commands.core.fast import FastHandler
 
 
 @pytest.mark.asyncio

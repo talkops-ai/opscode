@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.messages.ai import UsageMetadata
 
-from dcoder.middleware.resume_state import (
+from opscode.middleware.resume_state import (
     ResumeState,
     ResumeStateMiddleware,
     _extract_context_tokens,

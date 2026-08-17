@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest
-from dcoder.middleware.registry import MiddlewareRegistry
-from dcoder.middleware.configurable_model import ConfigurableModelMiddleware
+from opscode.middleware.registry import MiddlewareRegistry
+from opscode.middleware.configurable_model import ConfigurableModelMiddleware
 
 def test_middleware_registry():
     registry = MiddlewareRegistry()

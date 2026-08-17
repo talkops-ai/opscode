@@ -3,11 +3,11 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 
-from dcoder.config.settings import resolve_env_var, Settings, _load_dotenv
-from dcoder.config.manifest import ENV_PREFIX, DOTENV_DENIED_ENV_KEYS
+from opscode.config.settings import resolve_env_var, Settings, _load_dotenv
+from opscode.config.manifest import ENV_PREFIX, DOTENV_DENIED_ENV_KEYS
 
 def test_resolve_env_var():
-    with patch.dict(os.environ, {"DCODER_TEST_VAR": "prefixed", "TEST_VAR": "plain"}):
+    with patch.dict(os.environ, {"OPSCODE_TEST_VAR": "prefixed", "TEST_VAR": "plain"}):
         assert resolve_env_var("TEST_VAR") == "prefixed"
         
     with patch.dict(os.environ, {"TEST_VAR": "plain"}):
@@ -35,12 +35,12 @@ def test_dotenv_denylist(tmp_path):
 
 def test_settings_path_helpers():
     s = Settings(project_root=Path("/fake/project"))
-    assert s.get_user_skills_dir("dcoder") == s.user_dcoder_dir / "dcoder" / "skills"
-    assert s.get_project_skills_dir() == Path("/fake/project") / ".dcoder" / "skills"
+    assert s.get_user_skills_dir("opscode") == s.user_opscode_dir / "opscode" / "skills"
+    assert s.get_project_skills_dir() == Path("/fake/project") / ".opscode" / "skills"
 
 
 def test_upsert_env_vars(tmp_path):
-    from dcoder.config.paths import upsert_env_vars
+    from opscode.config.paths import upsert_env_vars
 
     env_file = tmp_path / ".env"
     initial_content = (

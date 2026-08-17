@@ -19,12 +19,12 @@ from typing import Any, cast
 
 import pytest
 
-from dcoder.subagents.types import SubagentMetadata
+from opscode.subagents.types import SubagentMetadata
 
-from dcoder.plugins.manifest import build_inventory, load_manifest
-from dcoder.plugins.marketplace import find_marketplace_manifest
-from dcoder.plugins.models import ComponentInventory, PluginInstance
-from dcoder.plugins.project_plugins import (
+from opscode.plugins.manifest import build_inventory, load_manifest
+from opscode.plugins.marketplace import find_marketplace_manifest
+from opscode.plugins.models import ComponentInventory, PluginInstance
+from opscode.plugins.project_plugins import (
     ProjectPluginResult,
     _build_plugin_instance,
     _collect_skill_names,
@@ -36,7 +36,7 @@ from dcoder.plugins.project_plugins import (
 )
 
 # Monkeypatch target for plugin_data_dir — used in _build_plugin_instance
-_PLUGIN_DATA_DIR_TARGET = "dcoder.plugins.store.plugin_data_dir"
+_PLUGIN_DATA_DIR_TARGET = "opscode.plugins.store.plugin_data_dir"
 
 
 # ── Shared fixtures ────────────────────────────────────────────
@@ -52,8 +52,8 @@ def _load_plugin_inventory(plugin_dir: Path) -> ComponentInventory:
 
 
 def _write_marketplace(root: Path, plugins: list[dict]) -> Path:
-    """Write a marketplace.json under .dcoder-plugin convention and return its path."""
-    mp_dir = root / ".dcoder-plugin"
+    """Write a marketplace.json under .opscode-plugin convention and return its path."""
+    mp_dir = root / ".opscode-plugin"
     mp_dir.mkdir(parents=True, exist_ok=True)
     mp_path = mp_dir / "marketplace.json"
     mp_path.write_text(
@@ -187,8 +187,8 @@ def _patch_plugin_data_dir(tmp_path, monkeypatch):
 class TestMarketplaceDiscoveryPaths:
     """Verify marketplace manifest discovery from all supported relative paths."""
 
-    def test_discovers_dcoder_plugin_marketplace(self, tmp_path):
-        mp_dir = tmp_path / ".dcoder-plugin"
+    def test_discovers_opscode_plugin_marketplace(self, tmp_path):
+        mp_dir = tmp_path / ".opscode-plugin"
         mp_dir.mkdir()
         (mp_dir / "marketplace.json").write_text(
             json.dumps({"name": "mp", "plugins": []}), encoding="utf-8",
@@ -196,7 +196,7 @@ class TestMarketplaceDiscoveryPaths:
         found = find_marketplace_manifest(tmp_path)
         assert found is not None
         assert found.name == "marketplace.json"
-        assert ".dcoder-plugin" in str(found.parent)
+        assert ".opscode-plugin" in str(found.parent)
 
     def test_discovers_claude_plugin_marketplace(self, tmp_path):
         mp_dir = tmp_path / ".claude-plugin"
@@ -208,17 +208,17 @@ class TestMarketplaceDiscoveryPaths:
         assert found is not None
         assert ".claude-plugin" in str(found.parent)
 
-    def test_discovers_dcoder_plugins_marketplace(self, tmp_path):
-        """`.dcoder/plugins/marketplace.json` is found when searching `.dcoder/`."""
-        dcoder_dir = tmp_path / ".dcoder"
-        mp_dir = dcoder_dir / "plugins"
+    def test_discovers_opscode_plugins_marketplace(self, tmp_path):
+        """`.opscode/plugins/marketplace.json` is found when searching `.opscode/`."""
+        opscode_dir = tmp_path / ".opscode"
+        mp_dir = opscode_dir / "plugins"
         mp_dir.mkdir(parents=True)
         (mp_dir / "marketplace.json").write_text(
             json.dumps({"name": "mp", "plugins": []}), encoding="utf-8",
         )
-        # The search root is .dcoder/ (convention: find_marketplace_manifest
+        # The search root is .opscode/ (convention: find_marketplace_manifest
         # searches for _MARKETPLACE_RELATIVE_PATHS relative to the given root)
-        # But the path ".dcoder/plugins/marketplace.json" is relative to project root
+        # But the path ".opscode/plugins/marketplace.json" is relative to project root
         found = find_marketplace_manifest(tmp_path)
         assert found is not None
 
@@ -235,32 +235,32 @@ class TestMarketplaceDiscoveryPaths:
         assert found is None
 
     def test_precedence_first_match_wins(self, tmp_path):
-        """When .claude-plugin and .dcoder-plugin both exist, .claude-plugin wins (first in list)."""
+        """When .claude-plugin and .opscode-plugin both exist, .claude-plugin wins (first in list)."""
         claude_dir = tmp_path / ".claude-plugin"
         claude_dir.mkdir()
         (claude_dir / "marketplace.json").write_text(
             json.dumps({"name": "claude-mp", "plugins": []}), encoding="utf-8",
         )
 
-        dcoder_dir = tmp_path / ".dcoder-plugin"
-        dcoder_dir.mkdir()
-        (dcoder_dir / "marketplace.json").write_text(
-            json.dumps({"name": "dcoder-mp", "plugins": []}), encoding="utf-8",
+        opscode_dir = tmp_path / ".opscode-plugin"
+        opscode_dir.mkdir()
+        (opscode_dir / "marketplace.json").write_text(
+            json.dumps({"name": "opscode-mp", "plugins": []}), encoding="utf-8",
         )
 
         found = find_marketplace_manifest(tmp_path)
         assert found is not None
         assert ".claude-plugin" in str(found.parent)
 
-    def test_discovers_nested_dcoder_dcoder_plugin(self, tmp_path):
-        """`.dcoder/.dcoder-plugin/marketplace.json` is found."""
-        dcoder_dir = tmp_path / ".dcoder"
-        mp_dir = dcoder_dir / ".dcoder-plugin"
+    def test_discovers_nested_opscode_opscode_plugin(self, tmp_path):
+        """`.opscode/.opscode-plugin/marketplace.json` is found."""
+        opscode_dir = tmp_path / ".opscode"
+        mp_dir = opscode_dir / ".opscode-plugin"
         mp_dir.mkdir(parents=True)
         (mp_dir / "marketplace.json").write_text(
             json.dumps({"name": "nested-mp", "plugins": []}), encoding="utf-8",
         )
-        # Searching from project root should find it (via .dcoder/.dcoder-plugin path)
+        # Searching from project root should find it (via .opscode/.opscode-plugin path)
         found = find_marketplace_manifest(tmp_path)
         assert found is not None
 
@@ -289,8 +289,8 @@ class TestPluginBifurcation:
     def test_mixed_marketplace_bifurcates_correctly(self, tmp_path, _patch_plugin_data_dir):
         """Marketplace with both agent and non-agent plugins bifurcates correctly."""
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         # Agent plugin
@@ -300,7 +300,7 @@ class TestPluginBifurcation:
         _make_main_plugin(plugins_dir, "cost-est", skills=["cost-calc"])
 
         # Marketplace
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "tf-linter", "source": "./plugins/tf-linter"},
             {"name": "cost-est", "source": "./plugins/cost-est"},
         ])
@@ -459,12 +459,12 @@ class TestAgentPluginSkillBinding:
 
     def test_agent_plugin_skills_not_in_main_sources(self, tmp_path, _patch_plugin_data_dir):
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         _make_agent_plugin(plugins_dir, "agent-only", skills=["agent-skill"])
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "agent-only", "source": "./plugins/agent-only"},
         ])
 
@@ -503,15 +503,15 @@ class TestAgentPluginMCPBinding:
 
     def test_agent_plugin_mcp_not_in_main_configs(self, tmp_path, _patch_plugin_data_dir):
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         _make_agent_plugin(
             plugins_dir, "mcp-agent",
             mcp_servers={"test-server": {"command": "echo"}},
         )
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "mcp-agent", "source": "./plugins/mcp-agent"},
         ])
 
@@ -552,12 +552,12 @@ class TestMainPluginBinding:
 
     def test_main_plugin_skills_in_main_sources(self, tmp_path, _patch_plugin_data_dir):
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         _make_main_plugin(plugins_dir, "utilities", skills=["formatter"])
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "utilities", "source": "./plugins/utilities"},
         ])
 
@@ -567,15 +567,15 @@ class TestMainPluginBinding:
 
     def test_main_plugin_mcp_in_main_configs(self, tmp_path, _patch_plugin_data_dir):
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         _make_main_plugin(
             plugins_dir, "mcp-main",
             mcp_servers={"pricing": {"command": "price-server"}},
         )
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "mcp-main", "source": "./plugins/mcp-main"},
         ])
 
@@ -586,15 +586,15 @@ class TestMainPluginBinding:
 
     def test_main_plugin_commands_discovered(self, tmp_path, _patch_plugin_data_dir):
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         _make_main_plugin(
             plugins_dir, "cmd-plugin",
             commands=["review-module", "scan-security"],
         )
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "cmd-plugin", "source": "./plugins/cmd-plugin"},
         ])
 
@@ -603,12 +603,12 @@ class TestMainPluginBinding:
 
     def test_main_plugin_no_subagent_produced(self, tmp_path, _patch_plugin_data_dir):
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         _make_main_plugin(plugins_dir, "simple", skills=["helper"])
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "simple", "source": "./plugins/simple"},
         ])
 
@@ -635,7 +635,7 @@ class TestSubagentsMiddlewareIntegration:
         return cast(SubagentMetadata, meta)
 
     def test_project_subagents_registered(self):
-        from dcoder.middleware.subagents import SubagentsMiddleware
+        from opscode.middleware.subagents import SubagentsMiddleware
 
         metas = [
             self._make_meta("proj-linter", "Linter"),
@@ -646,7 +646,7 @@ class TestSubagentsMiddlewareIntegration:
         assert "proj-scanner" in mw.subagent_names
 
     def test_middleware_before_agent_injects_registry(self):
-        from dcoder.middleware.subagents import SubagentsMiddleware
+        from opscode.middleware.subagents import SubagentsMiddleware
 
         metas = [
             self._make_meta(
@@ -665,7 +665,7 @@ class TestSubagentsMiddlewareIntegration:
         assert registry["proj-agent"]["permission_tier"] == "read-write"
 
     def test_get_subagent_by_name_works(self):
-        from dcoder.middleware.subagents import SubagentsMiddleware
+        from opscode.middleware.subagents import SubagentsMiddleware
 
         metas = [
             self._make_meta("lookup-target", "Target"),
@@ -678,7 +678,7 @@ class TestSubagentsMiddlewareIntegration:
         assert mw.get_subagent("nonexistent") is None
 
     def test_prompt_block_includes_project_agents(self):
-        from dcoder.middleware.subagents import SubagentsMiddleware
+        from opscode.middleware.subagents import SubagentsMiddleware
 
         metas = [
             self._make_meta("prompt-agent", "Show in prompt"),
@@ -689,7 +689,7 @@ class TestSubagentsMiddlewareIntegration:
         assert "Show in prompt" in block
 
     def test_register_subagent_at_runtime(self):
-        from dcoder.middleware.subagents import SubagentsMiddleware
+        from opscode.middleware.subagents import SubagentsMiddleware
 
         mw = SubagentsMiddleware()
         assert len(mw.subagent_names) == 0
@@ -703,13 +703,13 @@ class TestSubagentsMiddlewareIntegration:
 
 
 class TestEndToEndProjectPlugins:
-    """Full integration tests simulating a real .dcoder marketplace."""
+    """Full integration tests simulating a real .opscode marketplace."""
 
     def test_full_marketplace_with_mixed_plugins(self, tmp_path, _patch_plugin_data_dir):
         """Build a 3-plugin marketplace (1 agent + 2 main), verify complete bifurcation."""
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         # 1) Agent plugin with skills + MCP
@@ -733,7 +733,7 @@ class TestEndToEndProjectPlugins:
             commands=["review-module", "scan-security"],
         )
 
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "tf-linter", "source": "./plugins/tf-linter"},
             {"name": "cost-estimator", "source": "./plugins/cost-estimator"},
             {"name": "module-reviewer", "source": "./plugins/module-reviewer"},
@@ -764,10 +764,10 @@ class TestEndToEndProjectPlugins:
 
     def test_missing_plugin_source_produces_warning(self, tmp_path, _patch_plugin_data_dir):
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        dcoder_dir.mkdir(parents=True)
+        opscode_dir = project_root / ".opscode"
+        opscode_dir.mkdir(parents=True)
 
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "ghost-plugin", "source": "./plugins/nonexistent"},
         ])
 
@@ -779,8 +779,8 @@ class TestEndToEndProjectPlugins:
 
     def test_malformed_marketplace_json_produces_warning(self, tmp_path):
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        mp_dir = dcoder_dir / ".dcoder-plugin"
+        opscode_dir = project_root / ".opscode"
+        mp_dir = opscode_dir / ".opscode-plugin"
         mp_dir.mkdir(parents=True)
         (mp_dir / "marketplace.json").write_text(
             "{ invalid json !!!", encoding="utf-8",
@@ -795,8 +795,8 @@ class TestEndToEndProjectPlugins:
     def test_plugin_with_no_skills_no_agents_no_mcp(self, tmp_path, _patch_plugin_data_dir):
         """Minimal plugin with only a manifest → discovered but no components."""
         project_root = tmp_path / "project"
-        dcoder_dir = project_root / ".dcoder"
-        plugins_dir = dcoder_dir / "plugins"
+        opscode_dir = project_root / ".opscode"
+        plugins_dir = opscode_dir / "plugins"
         plugins_dir.mkdir(parents=True)
 
         # Plugin with only a manifest
@@ -808,7 +808,7 @@ class TestEndToEndProjectPlugins:
             json.dumps({"name": "empty-plugin"}), encoding="utf-8",
         )
 
-        _write_marketplace(dcoder_dir, [
+        _write_marketplace(opscode_dir, [
             {"name": "empty-plugin", "source": "./plugins/empty-plugin"},
         ])
 
@@ -825,7 +825,7 @@ class TestEndToEndProjectPlugins:
         assert len(result.main_skill_sources) == 0
         assert len(result.main_mcp_configs) == 0
 
-    def test_project_without_dcoder_dir_returns_empty(self, tmp_path):
+    def test_project_without_opscode_dir_returns_empty(self, tmp_path):
         result = load_project_plugins(tmp_path)
         assert len(result.subagent_metas) == 0
 

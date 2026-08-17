@@ -7,7 +7,7 @@
 
 import pytest
 
-from dcoder.ui.command_registry import (
+from opscode.ui.command_registry import (
     ALWAYS_IMMEDIATE,
     COMMANDS,
     BypassTier,
@@ -15,13 +15,13 @@ from dcoder.ui.command_registry import (
     build_skill_commands,
     get_command,
 )
-from dcoder.ui.message_store import (
+from opscode.ui.message_store import (
     MessageData,
     MessageStore,
     MessageType,
     ToolStatus,
 )
-from dcoder.ui.theme import (
+from opscode.ui.theme import (
     DARK_COLORS,
     LIGHT_COLORS,
     ThemeColors,
@@ -54,9 +54,9 @@ def test_theme_css_defaults():
 def test_theme_registry():
     """Verify built-in theme registration."""
     reg = get_registry()
-    assert "dcoder-dark" in reg
-    assert "dcoder-light" in reg
-    assert reg["dcoder-dark"].colors == DARK_COLORS
+    assert "opscode-dark" in reg
+    assert "opscode-light" in reg
+    assert reg["opscode-dark"].colors == DARK_COLORS
 
 
 def test_command_registry():

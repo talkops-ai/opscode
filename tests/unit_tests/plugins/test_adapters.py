@@ -1,8 +1,8 @@
 import pytest
 from pathlib import Path
-from dcoder.plugins.models import ComponentInventory, PluginInstance
-from dcoder.plugins.adapters.agents import plugin_subagents
-from dcoder.plugins.adapters.commands import plugin_commands
+from opscode.plugins.models import ComponentInventory, PluginInstance
+from opscode.plugins.adapters.agents import plugin_subagents
+from opscode.plugins.adapters.commands import plugin_commands
 
 
 def test_plugin_subagents_adapter(tmp_path):

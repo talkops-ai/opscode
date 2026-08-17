@@ -6,9 +6,9 @@ import pytest
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 
-from dcoder.memory.registry import MemoryRegistry
-from dcoder.memory.guard import ManagedMemoryGuardMiddleware
-from dcoder.memory.onboarding import (
+from opscode.memory.registry import MemoryRegistry
+from opscode.memory.guard import ManagedMemoryGuardMiddleware
+from opscode.memory.onboarding import (
     ONBOARDING_NAME_MEMORY_START,
     ONBOARDING_NAME_MEMORY_END,
     _onboarding_name_memory_block,
@@ -27,7 +27,7 @@ def test_memory_registry_paths():
     assert any("AGENTS.md" in str(p) for p in user_paths)
 
 def test_resolve_virtual_path_priorities(tmp_path):
-    from dcoder.config.settings import settings
+    from opscode.config.settings import settings
     reg = MemoryRegistry.get_instance()
     
     # Mock settings.project_root
@@ -35,9 +35,9 @@ def test_resolve_virtual_path_priorities(tmp_path):
     try:
         settings.project_root = tmp_path
         
-        # When no files exist, it should fallback to .dcoder/AGENTS.md
+        # When no files exist, it should fallback to .opscode/AGENTS.md
         fallback = reg.resolve_virtual_path("/memories/project/AGENTS.md")
-        assert fallback == tmp_path / ".dcoder" / "AGENTS.md"
+        assert fallback == tmp_path / ".opscode" / "AGENTS.md"
         
         # When .agents/AGENTS.md exists, it should resolve to it
         agents_dir = tmp_path / ".agents"
@@ -48,14 +48,14 @@ def test_resolve_virtual_path_priorities(tmp_path):
         resolved = reg.resolve_virtual_path("/memories/project/AGENTS.md")
         assert resolved == agents_md
         
-        # When .dcoder/AGENTS.md also exists, it should resolve to it (higher priority)
-        dcoder_dir = tmp_path / ".dcoder"
-        dcoder_dir.mkdir(exist_ok=True)
-        dcoder_md = dcoder_dir / "AGENTS.md"
-        dcoder_md.write_text("content", encoding="utf-8")
+        # When .opscode/AGENTS.md also exists, it should resolve to it (higher priority)
+        opscode_dir = tmp_path / ".opscode"
+        opscode_dir.mkdir(exist_ok=True)
+        opscode_md = opscode_dir / "AGENTS.md"
+        opscode_md.write_text("content", encoding="utf-8")
         
         resolved = reg.resolve_virtual_path("/memories/project/AGENTS.md")
-        assert resolved == dcoder_md
+        assert resolved == opscode_md
     finally:
         settings.project_root = original_project_root
 

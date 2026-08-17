@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from dcoder.agent.factory import _subagent_cli_middleware, create_dcoder_agent
-from dcoder.middleware.auto_mode import AutoModeHITLMiddleware, AsyncApprovalHITLMiddleware
+from opscode.agent.factory import _subagent_cli_middleware, create_opscode_agent
+from opscode.middleware.auto_mode import AutoModeHITLMiddleware, AsyncApprovalHITLMiddleware
 from langchain.agents.middleware.human_in_the_loop import HumanInTheLoopMiddleware
 from deepagents.middleware import FilesystemMiddleware
 
@@ -43,9 +43,9 @@ def test_subagent_cli_middleware_ordering():
 
 
 @patch("deepagents.create_deep_agent")
-@patch("dcoder.subagents.get_built_in_subagents")
-@patch("dcoder.subagents.list_subagents")
-def test_create_dcoder_agent_injects_filesystem_middleware(mock_list_subagents, mock_get_built_in, mock_create_deep_agent):
+@patch("opscode.subagents.get_built_in_subagents")
+@patch("opscode.subagents.list_subagents")
+def test_create_opscode_agent_injects_filesystem_middleware(mock_list_subagents, mock_get_built_in, mock_create_deep_agent):
     # Mock built-in subagents to return a dummy subagent
     mock_list_subagents.return_value = []
     mock_get_built_in.return_value = [{"name": "dummy_subagent", "description": "dummy"}]
@@ -56,8 +56,8 @@ def test_create_dcoder_agent_injects_filesystem_middleware(mock_list_subagents, 
     from langchain_core.language_models import BaseChatModel
     fake_model = MagicMock(spec=BaseChatModel)
 
-    # Call create_dcoder_agent with fs_tools
-    create_dcoder_agent(
+    # Call create_opscode_agent with fs_tools
+    create_opscode_agent(
         model=fake_model,
         fs_tools=["read_file", "write_file"],
         interactive=False,
@@ -87,9 +87,9 @@ def test_create_dcoder_agent_injects_filesystem_middleware(mock_list_subagents, 
 
 
 @patch("deepagents.create_deep_agent")
-@patch("dcoder.subagents.get_built_in_subagents")
-@patch("dcoder.subagents.list_subagents")
-def test_create_dcoder_agent_sets_empty_subagent_interrupt_on(mock_list_subagents, mock_get_built_in, mock_create_deep_agent):
+@patch("opscode.subagents.get_built_in_subagents")
+@patch("opscode.subagents.list_subagents")
+def test_create_opscode_agent_sets_empty_subagent_interrupt_on(mock_list_subagents, mock_get_built_in, mock_create_deep_agent):
     mock_list_subagents.return_value = []
     mock_get_built_in.return_value = [{"name": "dummy_subagent", "description": "dummy"}]
     mock_create_deep_agent.return_value = MagicMock()
@@ -97,7 +97,7 @@ def test_create_dcoder_agent_sets_empty_subagent_interrupt_on(mock_list_subagent
     from langchain_core.language_models import BaseChatModel
     fake_model = MagicMock(spec=BaseChatModel)
 
-    create_dcoder_agent(
+    create_opscode_agent(
         model=fake_model,
         interactive=True,
         auto_approve=False,
@@ -112,9 +112,9 @@ def test_create_dcoder_agent_sets_empty_subagent_interrupt_on(mock_list_subagent
 
 
 @patch("deepagents.create_deep_agent")
-@patch("dcoder.subagents.get_built_in_subagents")
-@patch("dcoder.subagents.list_subagents")
-def test_create_dcoder_agent_blocks_runnable_compiled_subagent_with_fs_tools(
+@patch("opscode.subagents.get_built_in_subagents")
+@patch("opscode.subagents.list_subagents")
+def test_create_opscode_agent_blocks_runnable_compiled_subagent_with_fs_tools(
     mock_list_subagents, mock_get_built_in, mock_create_deep_agent
 ):
     mock_list_subagents.return_value = []
@@ -125,18 +125,18 @@ def test_create_dcoder_agent_blocks_runnable_compiled_subagent_with_fs_tools(
     fake_model = MagicMock(spec=BaseChatModel)
 
     with pytest.raises(ValueError, match="Cannot enforce --allow-fs-tools on compiled subagent"):
-        create_dcoder_agent(
+        create_opscode_agent(
             model=fake_model,
             fs_tools=["read_file"],
             interactive=False,
         )
 
 
-@patch("dcoder.subagents.loader.load_async_subagents")
+@patch("opscode.subagents.loader.load_async_subagents")
 @patch("deepagents.create_deep_agent")
-@patch("dcoder.subagents.get_built_in_subagents")
-@patch("dcoder.subagents.list_subagents")
-def test_create_dcoder_agent_loads_async_subagents_by_default(
+@patch("opscode.subagents.get_built_in_subagents")
+@patch("opscode.subagents.list_subagents")
+def test_create_opscode_agent_loads_async_subagents_by_default(
     mock_list_subagents, mock_get_built_in, mock_create_deep_agent, mock_load_async
 ):
     mock_list_subagents.return_value = []
@@ -150,7 +150,7 @@ def test_create_dcoder_agent_loads_async_subagents_by_default(
 
     fake_model = MagicMock(spec=BaseChatModel)
 
-    create_dcoder_agent(
+    create_opscode_agent(
         model=fake_model,
         interactive=False,
     )
@@ -163,9 +163,9 @@ def test_create_dcoder_agent_loads_async_subagents_by_default(
 
 
 @patch("deepagents.create_deep_agent")
-@patch("dcoder.subagents.get_built_in_subagents")
-@patch("dcoder.subagents.list_subagents")
-def test_create_dcoder_agent_sets_empty_subagent_interrupt_on_auto_approve(
+@patch("opscode.subagents.get_built_in_subagents")
+@patch("opscode.subagents.list_subagents")
+def test_create_opscode_agent_sets_empty_subagent_interrupt_on_auto_approve(
     mock_list_subagents, mock_get_built_in, mock_create_deep_agent
 ):
     """Verify that auto_approve=True still sets explicit interrupt_on={} opt-out on subagents."""
@@ -176,7 +176,7 @@ def test_create_dcoder_agent_sets_empty_subagent_interrupt_on_auto_approve(
     from langchain_core.language_models import BaseChatModel
     fake_model = MagicMock(spec=BaseChatModel)
 
-    create_dcoder_agent(
+    create_opscode_agent(
         model=fake_model,
         interactive=True,
         auto_approve=True,
@@ -195,7 +195,7 @@ def test_create_dcoder_agent_sets_empty_subagent_interrupt_on_auto_approve(
 
 def test_async_hitl_middleware_class_name():
     """Verify AsyncApprovalHITLMiddleware and AutoModeHITLMiddleware expose class attribute name."""
-    from dcoder.middleware.auto_mode_hitl import AsyncApprovalHITLMiddleware, AutoModeHITLMiddleware
+    from opscode.middleware.auto_mode_hitl import AsyncApprovalHITLMiddleware, AutoModeHITLMiddleware
 
     assert AsyncApprovalHITLMiddleware.name == "HumanInTheLoopMiddleware"
     assert AutoModeHITLMiddleware.name == "HumanInTheLoopMiddleware"

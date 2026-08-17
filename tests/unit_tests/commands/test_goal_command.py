@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from dcoder.commands.power.goal import GoalHandler, get_goal_state
+from opscode.commands.power.goal import GoalHandler, get_goal_state
 
 
 class TestGoalCommand:

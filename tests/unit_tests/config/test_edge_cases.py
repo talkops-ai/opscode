@@ -8,11 +8,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dcoder.config.settings import _load_dotenv
-from dcoder.config.manifest import DOTENV_DENIED_ENV_KEYS
-from dcoder.backend.registry import BackendRegistry
-from dcoder.middleware.registry import MiddlewareRegistry
-from dcoder.backend.composite import DCodCompositeBackend
+from opscode.config.settings import _load_dotenv
+from opscode.config.manifest import DOTENV_DENIED_ENV_KEYS
+from opscode.backend.registry import BackendRegistry
+from opscode.middleware.registry import MiddlewareRegistry
+from opscode.backend.composite import DCodCompositeBackend
 
 def test_registry_thread_safety():
     """Verify that BackendRegistry and MiddlewareRegistry instances are thread-safe singletons."""
@@ -56,7 +56,7 @@ def test_dotenv_precedence(tmp_path, monkeypatch):
     project_env.write_text("TEST_PRECEDENCE=project_value\nPROJECT_ONLY=project_only")
     
     # Mock paths.GLOBAL_ENV_PATH to point to our temp global .env
-    import dcoder.config.paths as paths_mod
+    import opscode.config.paths as paths_mod
     monkeypatch.setattr(paths_mod, "GLOBAL_ENV_PATH", global_dir / ".env")
     
     # Run _load_dotenv starting from project directory

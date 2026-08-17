@@ -1,5 +1,5 @@
 import pytest
-from dcoder.middleware.local_context import build_detect_script, LocalContextMiddleware
+from opscode.middleware.local_context import build_detect_script, LocalContextMiddleware
 
 def test_build_detect_script():
     script = build_detect_script()

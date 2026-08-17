@@ -5,7 +5,7 @@ import pytest
 from langchain_core.messages import SystemMessage
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from dcoder.middleware.unified_system_message import (
+from opscode.middleware.unified_system_message import (
     UnifiedSystemMessageMiddleware,
     unify_system_message,
 )

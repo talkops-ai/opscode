@@ -1,10 +1,10 @@
 from typing import Any, cast
 import pytest
 from pathlib import Path
-from dcoder.subagents.loader import SubagentMetadata, _parse_subagent_file
-from dcoder.plugins.adapters.agents import _enrich_plugin_subagent
-from dcoder.plugins.models import ComponentInventory, PluginInstance
-from dcoder.agent.factory import _subagent_cli_middleware
+from opscode.subagents.loader import SubagentMetadata, _parse_subagent_file
+from opscode.plugins.adapters.agents import _enrich_plugin_subagent
+from opscode.plugins.models import ComponentInventory, PluginInstance
+from opscode.agent.factory import _subagent_cli_middleware
 
 def test_parse_subagent_rich_frontmatter(tmp_path):
     subagent_file = tmp_path / "AGENTS.md"
@@ -100,7 +100,7 @@ def test_subagent_cli_middleware_custom_skills(tmp_path):
 
 
 def test_subagent_local_skills_resolution(tmp_path):
-    from dcoder.middleware.skills import PluginSkillsMiddleware
+    from opscode.middleware.skills import PluginSkillsMiddleware
 
     bundle_dir = tmp_path / "terraform-reviewer"
     agents_dir = bundle_dir / "agents"

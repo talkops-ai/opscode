@@ -1,5 +1,5 @@
 import pytest
-from dcoder.middleware.tool_filter import ToolFilterMiddleware
+from opscode.middleware.tool_filter import ToolFilterMiddleware
 from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.messages import ToolMessage
 

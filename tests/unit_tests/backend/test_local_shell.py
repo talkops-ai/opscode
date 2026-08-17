@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
-from dcoder.backend.local import _build_shell_env
+from opscode.backend.local import _build_shell_env
 
 
 class TestBuildShellEnv:

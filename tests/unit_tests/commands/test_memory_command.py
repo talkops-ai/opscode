@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 import pytest
 
-from dcoder.commands.power.memory import MemoryHandler
-from dcoder.ui.command_registry import _STATIC_SKILL_ALIASES, build_skill_commands, CommandEntry
+from opscode.commands.power.memory import MemoryHandler
+from opscode.ui.command_registry import _STATIC_SKILL_ALIASES, build_skill_commands, CommandEntry
 
 
 class TestMemoryCommand:
@@ -59,7 +59,7 @@ class TestMemoryCommand:
         """/memory save, get, delete, clear operations manage MemoryStore entries."""
         handler = MemoryHandler()
 
-        with patch("dcoder.commands.power.memory._detect_project_root", return_value=tmp_path):
+        with patch("opscode.commands.power.memory._detect_project_root", return_value=tmp_path):
             # 1. Save
             ctx_save = make_ctx(
                 args="save terraform-fmt Use terraform fmt -recursive",
@@ -115,8 +115,8 @@ class TestMemoryCommand:
         agents_md = tmp_path / "AGENTS.md"
         agents_md.write_text("## Rule: Always run pytest before committing")
 
-        with patch("dcoder.commands.power.memory._detect_project_root", return_value=tmp_path), \
-             patch("dcoder.memory.registry.MemoryRegistry.get_memory_paths_for_scope", return_value=[agents_md]):
+        with patch("opscode.commands.power.memory._detect_project_root", return_value=tmp_path), \
+             patch("opscode.memory.registry.MemoryRegistry.get_memory_paths_for_scope", return_value=[agents_md]):
             
             # Save an entry to store
             ctx_save = make_ctx(

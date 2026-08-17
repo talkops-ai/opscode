@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock, MagicMock
 
-from dcoder.agent.factory import (
+from opscode.agent.factory import (
+    CLIContextSchema,
+    _interrupt_predicate,
     _should_interrupt_tool_call,
     _format_description,
     _resolve_ptc_option,
@@ -19,9 +21,10 @@ class TestShouldInterruptToolCall:
         request = Mock(runtime=Mock(context={"auto_approve": True}))
         assert not _should_interrupt_tool_call(request)
 
-    def test_respects_auto_approve_in_context_object(self):
-        """Returns False if auto_approve is True on context object."""
-        request = Mock(runtime=Mock(context=Mock(auto_approve=True)))
+    def test_respects_auto_approve_in_context_schema(self):
+        """Returns False if auto_approve is True on CLIContextSchema."""
+        ctx = CLIContextSchema(auto_approve=True)
+        request = Mock(runtime=Mock(context=ctx, store=None))
         assert not _should_interrupt_tool_call(request)
 
     def test_interrupts_by_default(self):
@@ -29,7 +32,8 @@ class TestShouldInterruptToolCall:
         request = Mock(runtime=Mock(context={"auto_approve": False}))
         assert _should_interrupt_tool_call(request)
         
-        request = Mock(runtime=Mock(context=Mock(auto_approve=False)))
+        ctx_schema = CLIContextSchema(auto_approve=False)
+        request = Mock(runtime=Mock(context=ctx_schema, store=None))
         assert _should_interrupt_tool_call(request)
         
         request = Mock(runtime=None)
@@ -106,7 +110,7 @@ class TestResolvePtcOption:
             _resolve_ptc_option(["execute"], tools=[], acknowledge_unsafe=False, auto_approve=False)
 
     def test_resolve_ptc_blocks_task_without_ack(self):
-        from dcoder.agent.factory import _INTERPRETER_WRITE_TOOLS
+        from opscode.agent.factory import _INTERPRETER_WRITE_TOOLS
         assert "task" in _INTERPRETER_WRITE_TOOLS
         assert "start_async_task" in _INTERPRETER_WRITE_TOOLS
         assert "update_async_task" in _INTERPRETER_WRITE_TOOLS
@@ -117,7 +121,7 @@ class TestResolvePtcOption:
 
 
 def test_format_task_description_formatting():
-    from dcoder.agent.factory import _format_description
+    from opscode.agent.factory import _format_description
 
     tool_call = {
         "name": "task",
@@ -135,7 +139,7 @@ def test_format_task_description_formatting():
 
 
 def test_format_task_description_truncation():
-    from dcoder.agent.factory import _format_description
+    from opscode.agent.factory import _format_description
 
     long_instructions = "x" * 600
     tool_call = {

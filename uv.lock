@@ -506,116 +506,6 @@ wheels = [
 ]
 
 [[package]]
-name = "dcoder"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "agent-client-protocol" },
-    { name = "aiosqlite" },
-    { name = "anyio" },
-    { name = "boto3" },
-    { name = "deepagents", extra = ["quickjs"] },
-    { name = "deepagents-acp" },
-    { name = "filelock" },
-    { name = "genai-prices" },
-    { name = "httpx" },
-    { name = "langchain" },
-    { name = "langchain-anthropic" },
-    { name = "langchain-core" },
-    { name = "langchain-google-genai" },
-    { name = "langchain-mcp-adapters" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "langgraph-checkpoint-sqlite" },
-    { name = "langgraph-cli", extra = ["inmem"] },
-    { name = "langgraph-sdk" },
-    { name = "langsmith" },
-    { name = "markdown-it-py" },
-    { name = "markdownify" },
-    { name = "mcp" },
-    { name = "packaging" },
-    { name = "pillow" },
-    { name = "pydantic" },
-    { name = "pygments" },
-    { name = "pyperclip" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "rich" },
-    { name = "rich-pixels" },
-    { name = "tavily-python" },
-    { name = "textual" },
-    { name = "tomli-w" },
-    { name = "typing-extensions" },
-    { name = "urllib3" },
-    { name = "uuid-utils" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "pytest-timeout" },
-    { name = "pytest-xdist" },
-]
-test-integration = [
-    { name = "agentevals" },
-    { name = "langsmith" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "agent-client-protocol", specifier = ">=0.11.0" },
-    { name = "agentevals", marker = "extra == 'test-integration'", specifier = ">=0.0.8" },
-    { name = "aiosqlite", specifier = ">=0.22.1" },
-    { name = "anyio", specifier = ">=4.14.2" },
-    { name = "boto3", specifier = ">=1.43.51" },
-    { name = "deepagents", extras = ["quickjs"], specifier = ">=0.7.1" },
-    { name = "deepagents-acp", specifier = ">=0.0.9" },
-    { name = "filelock", specifier = ">=3.18.0" },
-    { name = "genai-prices", specifier = ">=0.1.0" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "langchain", specifier = ">=1.3.14" },
-    { name = "langchain-anthropic", specifier = ">=1.5.3" },
-    { name = "langchain-core", specifier = ">=1.5.3" },
-    { name = "langchain-google-genai", specifier = ">=4.3.2" },
-    { name = "langchain-mcp-adapters", specifier = ">=0.3.0" },
-    { name = "langchain-openai", specifier = ">=1.4.1" },
-    { name = "langgraph", specifier = ">=1.2.10" },
-    { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.0" },
-    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.31" },
-    { name = "langgraph-sdk", specifier = ">=0.4.2" },
-    { name = "langsmith", specifier = ">=0.10.6" },
-    { name = "langsmith", marker = "extra == 'test-integration'", specifier = ">=0.10.6" },
-    { name = "markdown-it-py", specifier = ">=4.2.0" },
-    { name = "markdownify", specifier = ">=1.2.3" },
-    { name = "mcp", specifier = ">=1.28.1" },
-    { name = "packaging", specifier = ">=26.2" },
-    { name = "pillow", specifier = ">=12.3.0" },
-    { name = "pydantic", specifier = ">=2.13.4" },
-    { name = "pygments", specifier = ">=2.20.0" },
-    { name = "pyperclip", specifier = ">=1.11.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.3" },
-    { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.5" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "requests", specifier = ">=2.34.2" },
-    { name = "rich", specifier = ">=15.0.0" },
-    { name = "rich-pixels", specifier = ">=3.0.0" },
-    { name = "tavily-python", specifier = ">=0.7.26" },
-    { name = "textual", specifier = ">=8.2.8" },
-    { name = "tomli-w", specifier = ">=1.2.0" },
-    { name = "typing-extensions", specifier = ">=4.16.0" },
-    { name = "urllib3", specifier = ">=2.7.0" },
-    { name = "uuid-utils", specifier = ">=0.17.0" },
-]
-provides-extras = ["dev", "test-integration"]
-
-[[package]]
 name = "deepagents"
 version = "0.7.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2594,6 +2484,116 @@ sdist = { url = "https://files.pythonhosted.org/packages/ef/52/9ba0f43b686e7f3dd
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/45/a132b9074aa18e799b891b91ad72133c98d8042c70f6240e4c5f9dabee2f/structlog-25.5.0-py3-none-any.whl", hash = "sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f", size = 72510, upload-time = "2025-10-27T08:28:21.535Z" },
 ]
+
+[[package]]
+name = "talkops-opscode"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "agent-client-protocol" },
+    { name = "aiosqlite" },
+    { name = "anyio" },
+    { name = "boto3" },
+    { name = "deepagents", extra = ["quickjs"] },
+    { name = "deepagents-acp" },
+    { name = "filelock" },
+    { name = "genai-prices" },
+    { name = "httpx" },
+    { name = "langchain" },
+    { name = "langchain-anthropic" },
+    { name = "langchain-core" },
+    { name = "langchain-google-genai" },
+    { name = "langchain-mcp-adapters" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "langgraph-checkpoint-sqlite" },
+    { name = "langgraph-cli", extra = ["inmem"] },
+    { name = "langgraph-sdk" },
+    { name = "langsmith" },
+    { name = "markdown-it-py" },
+    { name = "markdownify" },
+    { name = "mcp" },
+    { name = "packaging" },
+    { name = "pillow" },
+    { name = "pydantic" },
+    { name = "pygments" },
+    { name = "pyperclip" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "rich" },
+    { name = "rich-pixels" },
+    { name = "tavily-python" },
+    { name = "textual" },
+    { name = "tomli-w" },
+    { name = "typing-extensions" },
+    { name = "urllib3" },
+    { name = "uuid-utils" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-timeout" },
+    { name = "pytest-xdist" },
+]
+test-integration = [
+    { name = "agentevals" },
+    { name = "langsmith" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent-client-protocol", specifier = ">=0.11.0" },
+    { name = "agentevals", marker = "extra == 'test-integration'", specifier = ">=0.0.8" },
+    { name = "aiosqlite", specifier = ">=0.22.1" },
+    { name = "anyio", specifier = ">=4.14.2" },
+    { name = "boto3", specifier = ">=1.43.51" },
+    { name = "deepagents", extras = ["quickjs"], specifier = ">=0.7.1" },
+    { name = "deepagents-acp", specifier = ">=0.0.9" },
+    { name = "filelock", specifier = ">=3.18.0" },
+    { name = "genai-prices", specifier = ">=0.1.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "langchain", specifier = ">=1.3.14" },
+    { name = "langchain-anthropic", specifier = ">=1.5.3" },
+    { name = "langchain-core", specifier = ">=1.5.3" },
+    { name = "langchain-google-genai", specifier = ">=4.3.2" },
+    { name = "langchain-mcp-adapters", specifier = ">=0.3.0" },
+    { name = "langchain-openai", specifier = ">=1.4.1" },
+    { name = "langgraph", specifier = ">=1.2.10" },
+    { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.0" },
+    { name = "langgraph-cli", extras = ["inmem"], specifier = ">=0.4.31" },
+    { name = "langgraph-sdk", specifier = ">=0.4.2" },
+    { name = "langsmith", specifier = ">=0.10.6" },
+    { name = "langsmith", marker = "extra == 'test-integration'", specifier = ">=0.10.6" },
+    { name = "markdown-it-py", specifier = ">=4.2.0" },
+    { name = "markdownify", specifier = ">=1.2.3" },
+    { name = "mcp", specifier = ">=1.28.1" },
+    { name = "packaging", specifier = ">=26.2" },
+    { name = "pillow", specifier = ">=12.3.0" },
+    { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "pygments", specifier = ">=2.20.0" },
+    { name = "pyperclip", specifier = ">=1.11.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.3" },
+    { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.5" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "requests", specifier = ">=2.34.2" },
+    { name = "rich", specifier = ">=15.0.0" },
+    { name = "rich-pixels", specifier = ">=3.0.0" },
+    { name = "tavily-python", specifier = ">=0.7.26" },
+    { name = "textual", specifier = ">=8.2.8" },
+    { name = "tomli-w", specifier = ">=1.2.0" },
+    { name = "typing-extensions", specifier = ">=4.16.0" },
+    { name = "urllib3", specifier = ">=2.7.0" },
+    { name = "uuid-utils", specifier = ">=0.17.0" },
+]
+provides-extras = ["dev", "test-integration"]
 
 [[package]]
 name = "tavily-python"

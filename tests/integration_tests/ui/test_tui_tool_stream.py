@@ -8,8 +8,8 @@ from textual.app import App
 from textual.containers import VerticalScroll
 
 from langchain_core.messages import ToolMessage, AIMessageChunk
-from dcoder.ui.messages import MessageList, ToolGroupSummary, ToolCallMessage, AssistantMessage
-from dcoder.ui.textual_adapter import TextualAdapter
+from opscode.ui.widgets.messages import MessageList, ToolGroupSummary, ToolCallMessage, AssistantMessage
+from opscode.ui.textual_adapter import TextualAdapter
 
 from textual.theme import Theme
 

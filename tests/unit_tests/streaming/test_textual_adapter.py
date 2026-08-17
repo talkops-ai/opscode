@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from unittest.mock import Mock, MagicMock
 
-from dcoder.ui.textual_adapter import (
+from opscode.ui.textual_adapter import (
     _format_thinking_tags,
     _format_thinking_quote,
     _extract_text_and_thinking,
@@ -64,7 +64,7 @@ class TestTextualAdapterToolMessage:
     @pytest.mark.asyncio
     async def test_tool_message_with_content_blocks_intercepted(self):
         """Verify ToolMessage with content_blocks correctly routes to update_tool_result."""
-        from dcoder.ui.textual_adapter import TextualAdapter
+        from opscode.ui.textual_adapter import TextualAdapter
         from langchain_core.messages import ToolMessage
         
         adapter = TextualAdapter(
@@ -100,7 +100,7 @@ class TestTextualAdapterToolMessage:
     @pytest.mark.asyncio
     async def test_duplicate_interrupts_deduplicated(self):
         """Verify that duplicate interrupt events with the same interrupt_id are deduplicated."""
-        from dcoder.ui.textual_adapter import TextualAdapter
+        from opscode.ui.textual_adapter import TextualAdapter
 
         mock_app = MagicMock()
         loop = asyncio.get_running_loop()

@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands._router import CommandRouter
-from dcoder.commands.core.bug import BugHandler
+from opscode.commands._base import CommandContext
+from opscode.commands._router import CommandRouter
+from opscode.commands.core.bug import BugHandler
 
 
 @pytest.mark.asyncio
@@ -18,8 +18,8 @@ async def test_bug_handler(mock_open):
 
     res = await handler.execute(ctx)
     assert res.success is True
-    assert res.message is not None and "https://github.com/talkops-ai/dcoder/issues/new" in res.message
-    mock_open.assert_called_once_with("https://github.com/talkops-ai/dcoder/issues/new")
+    assert res.message is not None and "https://github.com/talkops-ai/opscode/issues/new" in res.message
+    mock_open.assert_called_once_with("https://github.com/talkops-ai/opscode/issues/new")
 
 
 @pytest.mark.asyncio
@@ -31,7 +31,7 @@ async def test_bug_handler_no_browser_fallback(mock_open):
 
     res = await handler.execute(ctx)
     assert res.success is True
-    assert res.message is not None and "https://github.com/talkops-ai/dcoder/issues/new" in res.message
+    assert res.message is not None and "https://github.com/talkops-ai/opscode/issues/new" in res.message
 
 
 @pytest.mark.asyncio
@@ -45,5 +45,5 @@ async def test_feedback_alias_router_dispatch(mock_open):
 
     res = await router.dispatch("/feedback", ctx)
     assert res.success is True
-    assert res.message is not None and "https://github.com/talkops-ai/dcoder/issues/new" in res.message
-    mock_open.assert_called_once_with("https://github.com/talkops-ai/dcoder/issues/new")
+    assert res.message is not None and "https://github.com/talkops-ai/opscode/issues/new" in res.message
+    mock_open.assert_called_once_with("https://github.com/talkops-ai/opscode/issues/new")

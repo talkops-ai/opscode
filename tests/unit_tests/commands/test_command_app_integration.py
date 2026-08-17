@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dcoder.commands._base import BaseCommandHandler, CommandContext, CommandResult
-from dcoder.commands._types import CommandCategory, SafetyLevel
-from dcoder.ui.app import DCoderApp
+from opscode.commands._base import BaseCommandHandler, CommandContext, CommandResult
+from opscode.commands._types import CommandCategory, SafetyLevel
+from opscode.ui.app import OpsCodeApp
 
 
 class RegisteredTestCommand(BaseCommandHandler):
@@ -28,7 +28,7 @@ class RegisteredTestCommand(BaseCommandHandler):
 
 @pytest.fixture
 def dummy_app():
-    app = DCoderApp()
+    app = OpsCodeApp()
     app._mount_message = AsyncMock()  # type: ignore
     return app
 

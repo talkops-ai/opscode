@@ -7,7 +7,7 @@ import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 
-from dcoder.middleware.reliable_rubric import (
+from opscode.middleware.reliable_rubric import (
     ReliableRubricMiddleware,
     _exception_chain,
     _is_transient_grader_transport_error,

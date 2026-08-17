@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from dcoder.middleware.auto_mode_hitl import (
+from opscode.middleware.auto_mode_hitl import (
     AutoDecision,
     AutoDecisionBatch,
     AutoDecisionCategory,
@@ -59,11 +59,40 @@ def test_routine_write_allowed(tmp_path: Path):
     call_py: ToolCall = {"name": "write_file", "args": {"file_path": "src/app.py"}, "id": "1", "type": "tool_call"}
     assert _routine_write_allowed(root, call_py)
 
+    call_tf: ToolCall = {"name": "edit_file", "args": {"TargetFile": "modules/s3/variables.tf"}, "id": "tf-1", "type": "tool_call"}
+    assert _routine_write_allowed(root, call_tf)
+
+    call_tf_path: ToolCall = {"name": "edit_file", "args": {"path": "main.tf"}, "id": "tf-2", "type": "tool_call"}
+    assert _routine_write_allowed(root, call_tf_path)
+
+    call_hcl: ToolCall = {"name": "write_file", "args": {"path": "terragrunt.hcl"}, "id": "hcl-1", "type": "tool_call"}
+    assert _routine_write_allowed(root, call_hcl)
+
+    call_tmpl: ToolCall = {"name": "write_file", "args": {"file": "template.j2"}, "id": "tmpl-1", "type": "tool_call"}
+    assert _routine_write_allowed(root, call_tmpl)
+
     call_env: ToolCall = {"name": "write_file", "args": {"file_path": ".env"}, "id": "2", "type": "tool_call"}
     assert not _routine_write_allowed(root, call_env)
 
     call_sh: ToolCall = {"name": "write_file", "args": {"file_path": "scripts/deploy.sh"}, "id": "3", "type": "tool_call"}
     assert not _routine_write_allowed(root, call_sh)
+
+
+def test_deterministic_allow_tools(tmp_path: Path):
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    call_tf: ToolCall = {"name": "edit_file", "args": {"TargetFile": "variables.tf"}, "id": "1", "type": "tool_call"}
+    assert _deterministic_allow(root, call_tf, None, (), None)
+
+    call_search: ToolCall = {"name": "web_search", "args": {"query": "terraform aws s3"}, "id": "2", "type": "tool_call"}
+    assert _deterministic_allow(root, call_search, None, (), None)
+
+    call_fetch: ToolCall = {"name": "fetch_url", "args": {"url": "https://example.com"}, "id": "3", "type": "tool_call"}
+    assert _deterministic_allow(root, call_fetch, None, (), None)
+
+    call_task: ToolCall = {"name": "task", "args": {"description": "audit"}, "id": "4", "type": "tool_call"}
+    assert _deterministic_allow(root, call_task, None, (), None)
 
 
 def test_fixed_repo_command_allowed(tmp_path: Path):

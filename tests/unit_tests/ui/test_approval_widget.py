@@ -4,10 +4,10 @@ import asyncio
 import pytest
 from unittest.mock import Mock, MagicMock
 from textual.app import App, ComposeResult
-from dcoder.file_ops import is_sensitive_file_path, format_display_path
-from dcoder.ui.tool_renderers import get_renderer
-from dcoder.ui.widgets.approval import ApprovalMenu, _is_command_too_long, _truncate_command
-from dcoder.ui.subagent_panel import SubagentPanel
+from opscode.file_ops import is_sensitive_file_path, format_display_path
+from opscode.ui.widgets.tool_renderers import get_renderer
+from opscode.ui.widgets.approval import ApprovalMenu, _is_command_too_long, _truncate_command
+from opscode.ui.widgets.subagent_panel import SubagentPanel
 
 
 def test_sensitive_file_detection():
@@ -101,9 +101,9 @@ async def test_approval_menu_reject_with_reason():
 @pytest.mark.asyncio
 async def test_app_approval_menu_decided_removes_widget(monkeypatch):
     """Test that _on_approval_menu_decided removes the pending approval widget from DOM."""
-    from dcoder.ui.app import DCoderApp
+    from opscode.ui.app import OpsCodeApp
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     removed = False
 
     class MockMenu:
@@ -133,9 +133,9 @@ async def test_app_approval_menu_decided_removes_widget(monkeypatch):
 @pytest.mark.asyncio
 async def test_app_request_approval_waits_for_pending_approval(monkeypatch):
     """Test that _request_approval waits for active pending approval widget to clear."""
-    from dcoder.ui.app import DCoderApp
+    from opscode.ui.app import OpsCodeApp
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     app._pending_approval_widget = "active_dummy_widget"
 
     async def clear_widget_later():
@@ -291,8 +291,8 @@ async def test_subagent_panel_timer_pause_resume():
 @pytest.mark.asyncio
 async def test_task_approval_widget_rendering():
     """Verify TaskApprovalWidget renders subagent_type, warning, and task instructions."""
-    from dcoder.ui.tool_renderers import TaskRenderer
-    from dcoder.ui.tool_widgets import TaskApprovalWidget
+    from opscode.ui.widgets.tool_renderers import TaskRenderer
+    from opscode.ui.widgets.tool_widgets import TaskApprovalWidget
 
     tool_args = {
         "subagent_type": "terraform-reviewer",

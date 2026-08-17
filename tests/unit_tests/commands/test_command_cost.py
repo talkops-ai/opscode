@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands.core.cost import CostHandler
+from opscode.commands._base import CommandContext
+from opscode.commands.core.cost import CostHandler
 
 
 def test_format_token_counts():

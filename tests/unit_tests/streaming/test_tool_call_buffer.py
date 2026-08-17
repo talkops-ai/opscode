@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from dcoder.ui._tool_stream import (
+from opscode.ui.widgets._tool_stream import (
     ToolCallBuffer,
     _exceeds_json_container_depth,
     _looks_structurally_complete,

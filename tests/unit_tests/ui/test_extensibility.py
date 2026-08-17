@@ -4,9 +4,9 @@
 - welcome.py
 """
 
-from dcoder.plugins import discover_plugins
-from dcoder.ui.preferences import UserPreferences, load_preferences
-from dcoder.ui.welcome import WelcomeBanner
+from opscode.plugins import discover_plugins
+from opscode.ui.preferences import UserPreferences, load_preferences
+from opscode.ui.widgets.welcome import WelcomeBanner
 
 
 def test_discover_plugins():
@@ -15,7 +15,7 @@ def test_discover_plugins():
     assert plugins[0].name == "terraform"
 
 
-from dcoder.ui.theme import get_registry
+from opscode.ui.theme import get_registry
 
 
 def test_user_preferences():
@@ -26,7 +26,7 @@ def test_user_preferences():
 
 
 def test_devops_tool_detection():
-    from dcoder.commands.core.doctor import DoctorHandler
+    from opscode.commands.core.doctor import DoctorHandler
 
     handler = DoctorHandler()
     sec = handler._collect_devops_tools()

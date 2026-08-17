@@ -16,9 +16,9 @@ class TestAgentBasicFlow:
     @pytest.mark.asyncio
     async def test_agent_responds_to_simple_prompt(self, test_model_spec):
         """Verify the agent can be created and responds to a basic prompt."""
-        from dcoder.agent.factory import create_dcoder_agent
+        from opscode.agent.factory import create_opscode_agent
 
-        agent, backend = create_dcoder_agent(
+        agent, backend = create_opscode_agent(
             model=test_model_spec,
             interactive=False,
         )
@@ -27,9 +27,9 @@ class TestAgentBasicFlow:
     @pytest.mark.asyncio
     async def test_agent_creation_with_defaults(self, test_model_spec):
         """Verify agent factory doesn't crash with default configuration."""
-        from dcoder.agent.factory import create_dcoder_agent
+        from opscode.agent.factory import create_opscode_agent
 
-        agent, backend = create_dcoder_agent(
+        agent, backend = create_opscode_agent(
             model=test_model_spec,
             interactive=False,
         )

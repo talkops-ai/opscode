@@ -2,8 +2,8 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from dcoder.exceptions import ModelConfigError
-from dcoder.model.config import ModelSpec, ModelConfig, get_provider_auth_status, ProviderAuthState
+from opscode.exceptions import ModelConfigError
+from opscode.model.config import ModelSpec, ModelConfig, get_provider_auth_status, ProviderAuthState
 
 def test_model_spec_parse():
     spec = ModelSpec.parse("anthropic:claude-3-5-sonnet")
@@ -39,7 +39,7 @@ params = { temperature = 0.2 }
 
 
 def test_auth_status():
-    with patch("dcoder.model.config.resolve_env_var") as mock_resolve:
+    with patch("opscode.model.config.resolve_env_var") as mock_resolve:
         mock_resolve.return_value = "my-key"
         status = get_provider_auth_status("openai")
         assert status.state == ProviderAuthState.CONFIGURED

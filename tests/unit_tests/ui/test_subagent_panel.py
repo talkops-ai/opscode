@@ -2,7 +2,7 @@
 
 import time
 import pytest
-from dcoder.ui.subagent_panel import (
+from opscode.ui.widgets.subagent_panel import (
     SubagentPanel,
     _Phase,
     _SubagentRecord,

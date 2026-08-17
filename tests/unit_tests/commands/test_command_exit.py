@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands._types import BypassTier, CommandCategory, SafetyLevel
-from dcoder.commands.core.exit_cmd import ExitHandler
+from opscode.commands._base import CommandContext
+from opscode.commands._types import BypassTier, CommandCategory, SafetyLevel
+from opscode.commands.core.exit_cmd import ExitHandler
 
 
 @pytest.mark.asyncio

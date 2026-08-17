@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dcoder.commands._base import BaseCommandHandler, CommandContext, CommandResult
-from dcoder.commands._router import CommandRouter
-from dcoder.commands._types import CommandCategory, SafetyLevel
+from opscode.commands._base import BaseCommandHandler, CommandContext, CommandResult
+from opscode.commands._router import CommandRouter
+from opscode.commands._types import CommandCategory, SafetyLevel
 
 
 # ── Helper: concrete handler for tests ──────────────────────────────
@@ -171,7 +171,7 @@ class TestCommandRouterDispatch:
 
 class TestCommandRouterAutoDiscovery:
     def test_discover_populates_handlers(self):
-        """auto_discover() loads handlers from dcoder.commands sub-packages."""
+        """auto_discover() loads handlers from opscode.commands sub-packages."""
         router = CommandRouter()
         router.auto_discover()
         handlers = router.all_handlers

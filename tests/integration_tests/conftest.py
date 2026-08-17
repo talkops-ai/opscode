@@ -20,9 +20,9 @@ def _has_any_api_key() -> bool:
         "GOOGLE_API_KEY",
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
-        "DCODER_GOOGLE_API_KEY",
-        "DCODER_ANTHROPIC_API_KEY",
-        "DCODER_OPENAI_API_KEY",
+        "OPSCODE_GOOGLE_API_KEY",
+        "OPSCODE_ANTHROPIC_API_KEY",
+        "OPSCODE_OPENAI_API_KEY",
     ]
     return any(os.environ.get(k) for k in key_vars)
 
@@ -37,7 +37,7 @@ def skip_if_no_api_key():
 # ── Test model (cheap/fast variant) ─────────────────────────────────
 
 INTEGRATION_TEST_MODEL = os.environ.get(
-    "DCODER_TEST_MODEL", "google-genai:gemini-2.0-flash"
+    "OPSCODE_TEST_MODEL", "google-genai:gemini-2.0-flash"
 )
 
 

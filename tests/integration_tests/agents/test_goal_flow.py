@@ -17,7 +17,7 @@ class TestGoalFlow:
     @pytest.mark.asyncio
     async def test_rubric_generation_structure(self, test_model_spec):
         """Verify rubric generator produces structured output."""
-        from dcoder.rubrics.generator import GOAL_RUBRIC_SYSTEM_PROMPT
+        from opscode.rubrics.generator import GOAL_RUBRIC_SYSTEM_PROMPT
 
         # Verify the system prompt exists and is non-trivial
         assert isinstance(GOAL_RUBRIC_SYSTEM_PROMPT, str)

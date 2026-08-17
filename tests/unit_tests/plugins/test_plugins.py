@@ -1,4 +1,4 @@
-"""Unit tests for DCoder scoped plugin installation enhancement.
+"""Unit tests for OpsCode scoped plugin installation enhancement.
 
 Tests cover:
 - Scoped enablement (user / project / local settings files)
@@ -15,10 +15,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.plugins.manifest import build_inventory, load_manifest
-from dcoder.plugins.marketplace import parse_marketplace_source
-from dcoder.plugins.models import (
+from opscode.commands._base import CommandContext
+from opscode.plugins.manifest import build_inventory, load_manifest
+from opscode.plugins.marketplace import parse_marketplace_source
+from opscode.plugins.models import (
     InstallScope,
     InstalledPluginEntry,
     LocalMarketplaceSource,
@@ -26,7 +26,7 @@ from dcoder.plugins.models import (
     UrlMarketplaceSource,
     split_plugin_id,
 )
-from dcoder.plugins.store import (
+from opscode.plugins.store import (
     _load_settings_enabled_plugins,
     _write_settings_enabled_plugins,
     add_installed_plugin,
@@ -133,7 +133,7 @@ class TestScopedEnablement:
 
     def test_user_scope_enablement(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "dcoder.plugins.store._user_settings_path", lambda: tmp_path / "settings.json"
+            "opscode.plugins.store._user_settings_path", lambda: tmp_path / "settings.json"
         )
         set_plugin_enabled("test@mp", True)
         assert "test@mp" in load_user_enabled_plugin_ids()
@@ -142,63 +142,63 @@ class TestScopedEnablement:
         assert "test@mp" not in load_user_enabled_plugin_ids()
 
     def test_project_scope_enablement(self, tmp_path, monkeypatch):
-        from dcoder.config import paths
+        from opscode.config import paths
         project_root = tmp_path / "myproject"
         project_root.mkdir()
-        (project_root / ".dcoder").mkdir()
+        (project_root / ".opscode").mkdir()
 
         monkeypatch.setattr(
             paths, "project_settings_path",
-            lambda pr: pr / ".dcoder" / "settings.json",
+            lambda pr: pr / ".opscode" / "settings.json",
         )
         set_plugin_enabled_for_scope("test@mp", True, scope="project", project_root=project_root)
         result = load_project_enabled_plugin_ids(project_root)
         assert "test@mp" in result
 
     def test_local_scope_enablement(self, tmp_path, monkeypatch):
-        from dcoder.config import paths
+        from opscode.config import paths
         project_root = tmp_path / "myproject"
         project_root.mkdir()
-        (project_root / ".dcoder").mkdir()
+        (project_root / ".opscode").mkdir()
 
         monkeypatch.setattr(
             paths, "project_local_settings_path",
-            lambda pr: pr / ".dcoder" / "settings.local.json",
+            lambda pr: pr / ".opscode" / "settings.local.json",
         )
         # Patch out _ensure_local_settings_gitignored so it doesn't touch real git config
         monkeypatch.setattr(
-            "dcoder.plugins.store._ensure_local_settings_gitignored", lambda _: None,
+            "opscode.plugins.store._ensure_local_settings_gitignored", lambda _: None,
         )
         set_plugin_enabled_for_scope("test@mp", True, scope="local", project_root=project_root)
         result = load_local_enabled_plugin_ids(project_root)
         assert "test@mp" in result
 
     def test_merged_enablement(self, tmp_path, monkeypatch):
-        from dcoder.config import paths
+        from opscode.config import paths
 
         user_settings = tmp_path / "user" / "settings.json"
         project_root = tmp_path / "project"
         project_root.mkdir()
-        (project_root / ".dcoder").mkdir()
+        (project_root / ".opscode").mkdir()
 
         monkeypatch.setattr(
-            "dcoder.plugins.store._user_settings_path", lambda: user_settings
+            "opscode.plugins.store._user_settings_path", lambda: user_settings
         )
         monkeypatch.setattr(
             paths, "project_settings_path",
-            lambda pr: pr / ".dcoder" / "settings.json",
+            lambda pr: pr / ".opscode" / "settings.json",
         )
         monkeypatch.setattr(
             paths, "project_local_settings_path",
-            lambda pr: pr / ".dcoder" / "settings.local.json",
+            lambda pr: pr / ".opscode" / "settings.local.json",
         )
 
         _write_settings_enabled_plugins(user_settings, {"user-plugin@mp"})
         _write_settings_enabled_plugins(
-            project_root / ".dcoder" / "settings.json", {"project-plugin@mp"}
+            project_root / ".opscode" / "settings.json", {"project-plugin@mp"}
         )
         _write_settings_enabled_plugins(
-            project_root / ".dcoder" / "settings.local.json", {"local-plugin@mp"}
+            project_root / ".opscode" / "settings.local.json", {"local-plugin@mp"}
         )
 
         merged = load_all_enabled_plugin_ids(project_root=project_root)
@@ -207,7 +207,7 @@ class TestScopedEnablement:
     def test_merged_without_project(self, tmp_path, monkeypatch):
         user_settings = tmp_path / "settings.json"
         monkeypatch.setattr(
-            "dcoder.plugins.store._user_settings_path", lambda: user_settings
+            "opscode.plugins.store._user_settings_path", lambda: user_settings
         )
         _write_settings_enabled_plugins(user_settings, {"user-only@mp"})
 
@@ -224,7 +224,7 @@ class TestScopedEnablement:
         """load_enabled_plugin_ids() reads from user settings."""
         user_settings = tmp_path / "settings.json"
         monkeypatch.setattr(
-            "dcoder.plugins.store._user_settings_path", lambda: user_settings
+            "opscode.plugins.store._user_settings_path", lambda: user_settings
         )
         _write_settings_enabled_plugins(user_settings, {"compat@mp"})
         result = load_enabled_plugin_ids()
@@ -239,7 +239,7 @@ class TestScopedInstallRegistry:
 
     def test_add_scoped_install_entry(self, tmp_path, monkeypatch):
         state_dir = tmp_path / "state"
-        monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
+        monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
 
         entry = add_installed_plugin(
             "test@mp",
@@ -258,7 +258,7 @@ class TestScopedInstallRegistry:
     def test_multi_scope_install(self, tmp_path, monkeypatch):
         """Same plugin installed at user and project scope simultaneously."""
         state_dir = tmp_path / "state"
-        monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
+        monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
 
         project_root = tmp_path / "myproject"
         project_root.mkdir()
@@ -285,7 +285,7 @@ class TestScopedInstallRegistry:
     def test_replace_same_scope_entry(self, tmp_path, monkeypatch):
         """Re-installing at the same scope replaces the existing entry."""
         state_dir = tmp_path / "replace_test_state"
-        monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
+        monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
 
         add_installed_plugin(
             "test@mp",
@@ -307,7 +307,7 @@ class TestScopedInstallRegistry:
     def test_backward_compat_load_installed(self, tmp_path, monkeypatch):
         """load_installed_plugins() returns first entry per plugin."""
         state_dir = tmp_path / "compat_test_state"
-        monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
+        monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
 
         project_root = tmp_path / "proj"
         project_root.mkdir()
@@ -334,7 +334,7 @@ class TestScopedInstallRegistry:
     def test_json_serialization_roundtrip(self, tmp_path, monkeypatch):
         """Verify all new fields survive a JSON roundtrip."""
         state_dir = tmp_path / "roundtrip_test_state"
-        monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
+        monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
 
         project_root = tmp_path / "proj"
         project_root.mkdir()
@@ -364,7 +364,7 @@ class TestScopedUninstall:
 
     def test_remove_single_scope(self, tmp_path, monkeypatch):
         state_dir = tmp_path / "remove_single_state"
-        monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
+        monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
 
         project_root = tmp_path / "proj"
         project_root.mkdir()
@@ -392,7 +392,7 @@ class TestScopedUninstall:
 
     def test_remove_all_scopes(self, tmp_path, monkeypatch):
         state_dir = tmp_path / "remove_all_state"
-        monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
+        monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
 
         add_installed_plugin(
             "test@mp", install_path="/cache/test", version="1.0.0", scope="user"
@@ -406,9 +406,9 @@ class TestScopedUninstall:
 
     def test_uninstall_deletes_cache_only_when_orphaned(self, tmp_path, monkeypatch):
         state_dir = tmp_path / "uninstall_orphan_state"
-        monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
+        monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: state_dir / "installed_plugins.json")
         monkeypatch.setattr(
-            "dcoder.plugins.store._user_settings_path",
+            "opscode.plugins.store._user_settings_path",
             lambda: tmp_path / "settings.json",
         )
 
@@ -431,12 +431,12 @@ class TestScopedUninstall:
         )
 
         # Uninstall project scope only — cache should survive
-        from dcoder.config import paths
+        from opscode.config import paths
         monkeypatch.setattr(
             paths, "project_settings_path",
-            lambda pr: pr / ".dcoder" / "settings.json",
+            lambda pr: pr / ".opscode" / "settings.json",
         )
-        (project_root / ".dcoder").mkdir(exist_ok=True)
+        (project_root / ".opscode").mkdir(exist_ok=True)
 
         uninstall_plugin("test@mp", scope="project", project_root=project_root)
         assert cache_dir.is_dir(), "Cache should survive when user scope still references it"
@@ -453,7 +453,7 @@ class TestTUIInstallOptions:
     """Tests for _install_details_options."""
 
     def test_options_without_project(self):
-        from dcoder.ui.plugin_manager import _install_details_options
+        from opscode.ui.widgets.plugin_manager import _install_details_options
 
         options = _install_details_options(has_project=False)
         ids = [o.id for o in options]
@@ -463,7 +463,7 @@ class TestTUIInstallOptions:
         assert "details-back" in ids
 
     def test_options_with_project(self):
-        from dcoder.ui.plugin_manager import _install_details_options
+        from opscode.ui.widgets.plugin_manager import _install_details_options
 
         options = _install_details_options(has_project=True)
         ids = [o.id for o in options]
@@ -481,7 +481,7 @@ class TestCLIScopeFlag:
 
     def test_install_parser_has_scope(self):
         import argparse
-        from dcoder.plugins.commands_cli import setup_plugin_parser
+        from opscode.plugins.commands_cli import setup_plugin_parser
 
         parser = argparse.ArgumentParser()
         sub = parser.add_subparsers(dest="command")
@@ -493,7 +493,7 @@ class TestCLIScopeFlag:
 
     def test_install_parser_default_scope(self):
         import argparse
-        from dcoder.plugins.commands_cli import setup_plugin_parser
+        from opscode.plugins.commands_cli import setup_plugin_parser
 
         parser = argparse.ArgumentParser()
         sub = parser.add_subparsers(dest="command")
@@ -504,7 +504,7 @@ class TestCLIScopeFlag:
 
     def test_uninstall_parser_scope_optional(self):
         import argparse
-        from dcoder.plugins.commands_cli import setup_plugin_parser
+        from opscode.plugins.commands_cli import setup_plugin_parser
 
         parser = argparse.ArgumentParser()
         sub = parser.add_subparsers(dest="command")
@@ -520,7 +520,7 @@ class TestCLIScopeFlag:
 
     def test_enable_disable_scope(self):
         import argparse
-        from dcoder.plugins.commands_cli import setup_plugin_parser
+        from opscode.plugins.commands_cli import setup_plugin_parser
 
         parser = argparse.ArgumentParser()
         sub = parser.add_subparsers(dest="command")
@@ -564,11 +564,11 @@ class TestInstalledPluginEntryModel:
 
 
 def test_plugin_store_operations(tmp_path, monkeypatch):
-    storage_dir = tmp_path / "dcoder_test"
-    monkeypatch.setenv("DCODER_PLUGIN_DIR", str(storage_dir))
-    monkeypatch.setattr("dcoder.plugins.store._installed_plugins_path", lambda: storage_dir / "installed_plugins.json")
+    storage_dir = tmp_path / "opscode_test"
+    monkeypatch.setenv("OPSCODE_PLUGIN_DIR", str(storage_dir))
+    monkeypatch.setattr("opscode.plugins.store._installed_plugins_path", lambda: storage_dir / "installed_plugins.json")
     monkeypatch.setattr(
-        "dcoder.plugins.store._user_settings_path",
+        "opscode.plugins.store._user_settings_path",
         lambda: tmp_path / "settings.json",
     )
 
@@ -593,7 +593,7 @@ def test_plugin_store_operations(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_plugins_handler_tui_push():
-    from dcoder.commands.core.plugins import PluginsHandler
+    from opscode.commands.core.plugins import PluginsHandler
 
     mock_app = MagicMock()
     ctx = CommandContext(
@@ -609,7 +609,7 @@ async def test_plugins_handler_tui_push():
 
 @pytest.mark.asyncio
 async def test_plugins_handler_cli_fallback():
-    from dcoder.commands.core.plugins import PluginsHandler
+    from opscode.commands.core.plugins import PluginsHandler
 
     ctx = CommandContext(
         app=None,

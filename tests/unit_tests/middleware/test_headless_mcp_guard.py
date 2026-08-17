@@ -2,8 +2,8 @@ import pytest
 from unittest.mock import MagicMock
 from langchain_core.messages import ToolMessage
 from langchain.agents.middleware.types import ToolCallRequest
-from dcoder.security.approval_mode import ApprovalMode, coerce_approval_mode, approval_mode_payload
-from dcoder.middleware.headless_mcp_guard import (
+from opscode.security.approval_mode import ApprovalMode, coerce_approval_mode, approval_mode_payload
+from opscode.middleware.headless_mcp_guard import (
     HeadlessMCPGuardMiddleware,
     gated_mcp_tool_names,
     mcp_tool_is_coherently_read_only,

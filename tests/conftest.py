@@ -12,7 +12,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch):
     """Automatically clean critical environment variables before each test."""
-    monkeypatch.delenv("DCODER_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("OPSCODE_PROJECT_ROOT", raising=False)
 
 
 # ── Auto-apply markers based on test path ───────────────────────────

@@ -3,7 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from dcoder.ui.messages import (
+from opscode.ui.widgets.messages import (
     _TOOL_GROUP_EXCLUSIONS,
     MessageList,
     ToolCallMessage,
@@ -49,12 +49,57 @@ async def test_add_tool_call_excludes_file_edits_from_live_group():
 
 
 @pytest.mark.asyncio
+async def test_multiple_consecutive_tool_calls_share_live_group():
+    """Verify that multiple consecutive tool calls join the same active live tool group."""
+    from textual.app import App, ComposeResult
+    from opscode.ui.theme import register_app_themes, get_theme_colors, get_css_variable_defaults
+
+    class TestApp(App[None]):
+        def on_mount(self) -> None:
+            register_app_themes(self)
+            self.theme = "opscode-dark"
+
+        def get_theme_variable_defaults(self) -> dict[str, str]:
+            colors = get_theme_colors(self)
+            return get_css_variable_defaults(colors=colors)
+
+        def compose(self) -> ComposeResult:
+            yield MessageList(id="messages")
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        msg_list = app.query_one("#messages", MessageList)
+
+        # Simulate streaming text before tools
+        msg_list.append_assistant_token("Thinking about files...")
+        msg_list.finish_assistant_message()
+
+        # First tool call
+        msg_list.add_tool_call(name="read_file", call_id="c1", args={"file_path": "a.tf"})
+        first_group = msg_list._active_tool_group
+        assert first_group is not None
+        assert len(first_group._tools) == 1
+
+        # Second tool call arriving after chunk parse
+        msg_list.finish_assistant_message()
+        msg_list.add_tool_call(name="read_file", call_id="c2", args={"file_path": "b.tf"})
+        assert msg_list._active_tool_group is first_group
+        assert len(first_group._tools) == 2
+
+        # Third tool call
+        msg_list.finish_assistant_message()
+        msg_list.add_tool_call(name="read_file", call_id="c3", args={"file_path": "c.tf"})
+        assert msg_list._active_tool_group is first_group
+        assert len(first_group._tools) == 3
+
+
+@pytest.mark.asyncio
 async def test_load_thread_history_restores_goal_objective():
     """Verify that _load_thread_history restores active goal state using _restore_goal_rubric_state."""
     from langchain_core.messages import HumanMessage, AIMessage
-    from dcoder.ui.app import DCoderApp
+    from opscode.ui.app import OpsCodeApp
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     app._get_thread_state_values = AsyncMock(return_value={
         "_goal_objective": "i want to write vpc terraform module",
         "_goal_status": "active",
@@ -84,10 +129,10 @@ async def test_load_thread_history_restores_goal_objective():
 async def test_load_thread_history_full_turn_with_assistant_response():
     """Verify that _load_thread_history mounts AssistantMessage text for full goal turns."""
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-    from dcoder.ui.app import DCoderApp
-    from dcoder.ui.messages import AssistantMessage
+    from opscode.ui.app import OpsCodeApp
+    from opscode.ui.widgets.messages import AssistantMessage
 
-    app = DCoderApp()
+    app = OpsCodeApp()
     app._get_thread_state_values = AsyncMock(return_value={
         "_goal_objective": "i want to write aws s3 module",
         "_goal_status": "active",

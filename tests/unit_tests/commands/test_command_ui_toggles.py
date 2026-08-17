@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dcoder.commands._base import CommandContext
-from dcoder.commands.power.ui_toggles import NotificationsHandler, ScrollbarHandler, TimestampsHandler
+from opscode.commands._base import CommandContext
+from opscode.commands.power.ui_toggles import NotificationsHandler, ScrollbarHandler, TimestampsHandler
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
-from dcoder.middleware.goal_criteria import (
+from opscode.middleware.goal_criteria import (
     GoalAmendRequest,
     GoalCreateRequest,
     GoalCriteriaMiddleware,

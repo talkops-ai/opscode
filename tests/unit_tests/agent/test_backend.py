@@ -2,9 +2,9 @@ import os
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from dcoder.backend.registry import BackendRegistry, register_backend
-from dcoder.backend.local import _build_shell_env, LocalShellBackend
-from dcoder.backend.composite import DCodCompositeBackend
+from opscode.backend.registry import BackendRegistry, register_backend
+from opscode.backend.local import _build_shell_env, LocalShellBackend
+from opscode.backend.composite import DCodCompositeBackend
 
 def test_backend_registry():
     registry = BackendRegistry()
@@ -20,7 +20,7 @@ def test_backend_registry():
 
 
 def test_register_backend_decorator():
-    from dcoder.backend.registry import get_backend_registry
+    from opscode.backend.registry import get_backend_registry
     global_registry = get_backend_registry()
     
     @register_backend("decorator_mock")

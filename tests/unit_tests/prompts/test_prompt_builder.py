@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from dcoder.prompts import (
+from opscode.prompts import (
     MODEL_IDENTITY_RE,
     build_model_identity_section,
     get_base_system_prompt,
@@ -59,13 +59,13 @@ class TestGetBaseSystemPrompt:
         prompt = get_base_system_prompt()
         assert isinstance(prompt, str)
         # Only assert non-empty if template exists
-        template = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "prompts" / "templates" / "system_prompt.md"
+        template = Path(__file__).parent.parent.parent.parent / "src" / "opscode" / "prompts" / "templates" / "system_prompt.md"
         if template.exists():
             assert len(prompt) > 100
 
     def test_interactive_mode_differences(self):
         """Interactive and non-interactive modes should produce different prompts."""
-        template = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "prompts" / "templates" / "system_prompt.md"
+        template = Path(__file__).parent.parent.parent.parent / "src" / "opscode" / "prompts" / "templates" / "system_prompt.md"
         if not template.exists():
             pytest.skip("System prompt template not found")
 
@@ -76,7 +76,7 @@ class TestGetBaseSystemPrompt:
         assert "headless" in headless_prompt.lower() or "non-interactive" in headless_prompt.lower() or "autonomous" in headless_prompt.lower()
 
     def test_model_identity_injected(self):
-        template = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "prompts" / "templates" / "system_prompt.md"
+        template = Path(__file__).parent.parent.parent.parent / "src" / "opscode" / "prompts" / "templates" / "system_prompt.md"
         if not template.exists():
             pytest.skip("System prompt template not found")
 
@@ -89,7 +89,7 @@ class TestGetBaseSystemPrompt:
         assert "anthropic" in prompt
 
     def test_working_directory_injected(self):
-        template = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "prompts" / "templates" / "system_prompt.md"
+        template = Path(__file__).parent.parent.parent.parent / "src" / "opscode" / "prompts" / "templates" / "system_prompt.md"
         if not template.exists():
             pytest.skip("System prompt template not found")
 
@@ -97,7 +97,7 @@ class TestGetBaseSystemPrompt:
         assert "/tmp/test-project" in prompt
 
     def test_restricted_fs_tools(self):
-        template = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "prompts" / "templates" / "system_prompt.md"
+        template = Path(__file__).parent.parent.parent.parent / "src" / "opscode" / "prompts" / "templates" / "system_prompt.md"
         if not template.exists():
             pytest.skip("System prompt template not found")
 
@@ -107,7 +107,7 @@ class TestGetBaseSystemPrompt:
 
     def test_no_unreplaced_placeholders(self):
         """Final prompt should not contain any unreplaced {placeholder} markers."""
-        template = Path(__file__).parent.parent.parent.parent / "src" / "dcoder" / "prompts" / "templates" / "system_prompt.md"
+        template = Path(__file__).parent.parent.parent.parent / "src" / "opscode" / "prompts" / "templates" / "system_prompt.md"
         if not template.exists():
             pytest.skip("System prompt template not found")
 

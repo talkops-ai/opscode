@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from dcoder.cli.main import cli_main, parse_args
-from dcoder.model.factory import detect_provider, normalize_model_spec
+from opscode.cli.main import cli_main, parse_args
+from opscode.model.factory import detect_provider, normalize_model_spec
 
 
 # ── Model Auto-detection & Normalization ────────────────────
@@ -60,7 +60,7 @@ class TestSubcommandDispatch:
     """Test CLI subcommand parsers and handlers."""
 
     def test_auth_list_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "auth", "list", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "auth", "list", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -70,7 +70,7 @@ class TestSubcommandDispatch:
         assert isinstance(data["data"], list)
 
     def test_auth_path(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "auth", "path", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "auth", "path", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -80,7 +80,7 @@ class TestSubcommandDispatch:
         assert "path" in data["data"]
 
     def test_config_summary_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "config", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "config", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -90,7 +90,7 @@ class TestSubcommandDispatch:
         assert isinstance(data["data"], list)
 
     def test_config_get_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "config", "get", "models.default", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "config", "get", "models.default", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -99,7 +99,7 @@ class TestSubcommandDispatch:
         assert data["command"] == "config get"
 
     def test_config_path_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "config", "path", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "config", "path", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -109,7 +109,7 @@ class TestSubcommandDispatch:
         assert "config_toml" in data["data"]
 
     def test_mcp_config_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "mcp", "config", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "mcp", "config", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -119,7 +119,7 @@ class TestSubcommandDispatch:
         assert "discovery_paths" in data["data"]
 
     def test_mcp_list_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "mcp", "list", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "mcp", "list", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -129,7 +129,7 @@ class TestSubcommandDispatch:
         assert isinstance(data["data"], list)
 
     def test_skills_list_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "skills", "list", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "skills", "list", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -139,7 +139,7 @@ class TestSubcommandDispatch:
         assert isinstance(data["data"], list)
 
     def test_agents_list_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "agents", "list", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "agents", "list", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -149,7 +149,7 @@ class TestSubcommandDispatch:
         assert any(a["name"] == "agent" for a in data["data"])
 
     def test_tools_list_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "tools", "list", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "tools", "list", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -159,7 +159,7 @@ class TestSubcommandDispatch:
         assert any(t["name"] == "execute" for t in data["data"])
 
     def test_tools_install_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "tools", "install", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "tools", "install", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -169,7 +169,7 @@ class TestSubcommandDispatch:
         assert data["data"]["tool"] == "ripgrep"
 
     def test_doctor_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "doctor", "--json"]):
+        with patch.object(sys, "argv", ["opscode", "doctor", "--json"]):
             with pytest.raises(SystemExit) as exc:
                 cli_main()
             assert exc.value.code == 0
@@ -180,12 +180,12 @@ class TestSubcommandDispatch:
         assert "sections" in data["data"]
 
     def test_threads_list_json(self, capsys):
-        with patch.object(sys, "argv", ["dcoder", "threads", "list", "--json"]):
-            with patch("dcoder.state.session.list_threads", new_callable=AsyncMock) as mock_list:
+        with patch.object(sys, "argv", ["opscode", "threads", "list", "--json"]):
+            with patch("opscode.state.session.list_threads", new_callable=AsyncMock) as mock_list:
                 mock_list.return_value = [
                     {
                         "thread_id": "t-123",
-                        "agent_name": "dcoder",
+                        "agent_name": "opscode",
                         "message_count": 5,
                         "updated_at": "2026-08-14T00:00:00Z",
                         "created_at": "2026-08-14T00:00:00Z",
@@ -208,8 +208,8 @@ class TestDefaultModelFlags:
     """Test --default-model and --clear-default-model flags."""
 
     def test_set_default_model(self, capsys):
-        with patch("dcoder.model.config.save_default_model", return_value=True) as mock_save:
-            with patch.object(sys, "argv", ["dcoder", "--default-model", "gpt-5.5"]):
+        with patch("opscode.model.config.save_default_model", return_value=True) as mock_save:
+            with patch.object(sys, "argv", ["opscode", "--default-model", "gpt-5.5"]):
                 with pytest.raises(SystemExit) as exc:
                     cli_main()
                 assert exc.value.code == 0
@@ -218,8 +218,8 @@ class TestDefaultModelFlags:
         assert "Default model set to openai:gpt-5.5" in captured.out
 
     def test_show_default_model(self, capsys):
-        with patch("dcoder.model.config.load_default_model", return_value="anthropic:claude-opus-4-8"):
-            with patch.object(sys, "argv", ["dcoder", "--default-model"]):
+        with patch("opscode.model.config.load_default_model", return_value="anthropic:claude-opus-4-8"):
+            with patch.object(sys, "argv", ["opscode", "--default-model"]):
                 with pytest.raises(SystemExit) as exc:
                     cli_main()
                 assert exc.value.code == 0
@@ -227,8 +227,8 @@ class TestDefaultModelFlags:
         assert "Default model: anthropic:claude-opus-4-8" in captured.out
 
     def test_clear_default_model(self, capsys):
-        with patch("dcoder.model.config.clear_default_model", return_value=True) as mock_clear:
-            with patch.object(sys, "argv", ["dcoder", "--clear-default-model"]):
+        with patch("opscode.model.config.clear_default_model", return_value=True) as mock_clear:
+            with patch.object(sys, "argv", ["opscode", "--clear-default-model"]):
                 with pytest.raises(SystemExit) as exc:
                     cli_main()
                 assert exc.value.code == 0

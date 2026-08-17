@@ -1,8 +1,8 @@
 from unittest.mock import patch, MagicMock
 import pytest
 
-from dcoder.exceptions import MissingCredentialsError
-from dcoder.model.factory import detect_provider, create_model
+from opscode.exceptions import MissingCredentialsError
+from opscode.model.factory import detect_provider, create_model
 
 def test_detect_provider():
     assert detect_provider("claude-3-5-sonnet") == "anthropic"
@@ -11,8 +11,8 @@ def test_detect_provider():
     assert detect_provider("unknown-model-name") is None
 
 
-@patch("dcoder.model.factory.has_provider_credentials")
-@patch("dcoder.model.factory._create_model_via_init")
+@patch("opscode.model.factory.has_provider_credentials")
+@patch("opscode.model.factory._create_model_via_init")
 def test_create_model(mock_init, mock_has_creds):
     mock_has_creds.return_value = True
     mock_model = MagicMock()
@@ -26,7 +26,7 @@ def test_create_model(mock_init, mock_has_creds):
     assert result.context_limit == 100000
 
 
-@patch("dcoder.model.factory.has_provider_credentials")
+@patch("opscode.model.factory.has_provider_credentials")
 def test_create_model_missing_credentials(mock_has_creds):
     mock_has_creds.return_value = False
     

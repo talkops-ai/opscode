@@ -7,18 +7,18 @@
 - operation_card.py
 """
 
-from dcoder.ui.devops_renderers import (
+from opscode.ui.widgets.devops_renderers import (
     AnsiblePlaybookRenderer,
     HelmDiffRenderer,
     KubectlRenderer,
     TerraformPlanRenderer,
 )
-from dcoder.ui.diff import compose_diff_lines
-from dcoder.ui.infra_panel import InfraStatePanel
-from dcoder.ui.operation_card import OperationCard
-from dcoder.ui.status import StatusBar
-from dcoder.ui.subagent_panel import SubagentPanel
-from dcoder.ui.tool_renderers import render_tool_approval
+from opscode.ui.widgets.diff import compose_diff_lines
+from opscode.ui.widgets.infra_panel import InfraStatePanel
+from opscode.ui.widgets.operation_card import OperationCard
+from opscode.ui.widgets.status import StatusBar
+from opscode.ui.widgets.subagent_panel import SubagentPanel
+from opscode.ui.widgets.tool_renderers import render_tool_approval
 
 
 def test_compose_diff_lines():

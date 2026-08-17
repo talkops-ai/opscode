@@ -4,7 +4,7 @@ import ipaddress
 
 import pytest
 
-from dcoder.security.url_validation import (
+from opscode.security.url_validation import (
     _UrlValidationError,
     _is_blocked_ip,
     _validate_url,

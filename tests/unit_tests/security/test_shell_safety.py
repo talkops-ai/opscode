@@ -2,7 +2,7 @@
 
 import pytest
 
-from dcoder.security.shell_safety import (
+from opscode.security.shell_safety import (
     DANGEROUS_SHELL_PATTERNS,
     DEVOPS_DESTRUCTIVE_COMMANDS,
     DEVOPS_SAFE_COMMANDS,

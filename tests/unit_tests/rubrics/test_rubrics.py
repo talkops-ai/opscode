@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import SystemMessage, HumanMessage
-from dcoder.rubrics.generator import generate_rubric
-from dcoder.rubrics.goal_tools import (
+from opscode.rubrics.generator import generate_rubric
+from opscode.rubrics.goal_tools import (
     GoalToolsMiddleware,
     _rubric_snapshot,
     _goal_snapshot,
