@@ -55,7 +55,7 @@
 ### 1. Install
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.1/scripts/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/main/scripts/install.sh | bash
 ```
 
 > [!NOTE]
