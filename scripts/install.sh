@@ -464,6 +464,7 @@ INSTALL_CMD=(
   "--python" "$PYTHON_VERSION"
   "$PRERELEASE_FLAG"
   "--force"
+  "--upgrade"
 )
 
 # If directory contains pyproject.toml and src/opscode (local repository), allow installing from directory
