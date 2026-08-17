@@ -4,7 +4,7 @@
 
 # OpsCode
 
-**A terminal-native AI agent for DevOps, SRE, and Platform Engineering. Ships with built-in subagents, skills and a plugin system to extend it to any stack. Built on LangGraph with modes to manage human in the loop.**
+**A terminal-native AI coding agent for DevOps, SRE, and Platform Engineering. Ships with built-in subagents, skills and a plugin system to extend it to any stack. Built with modes to manage human in the loop.**
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/orchestration-LangGraph-FF6F00.svg?style=flat-square&logo=langchain&logoColor=white)](https://langchain.com/)
@@ -21,32 +21,9 @@
 
 ## 🖥️ See It in Action
 
-<!-- TODO: Replace this ASCII mock with a VHS-generated terminal GIF/video once recorded -->
-
-```
-┌─ OpsCode v0.1.2 ────────────────────────────────────────── [Auto: Shift+Tab] ──┐
-│                                                                                │
-│ > User: Create an AWS S3 bucket with KMS customer-managed key encryption       │
-│                                                                                │
-│ 🤖 OpsCode [aws-terraform-module-writer]                                       │
-│ 💭 Analyzing AWS KMS & S3 security baseline...                                 │
-│ 🛠️ Tool: mcp__aws__get_kms_policy_schema                                      │
-│ 📝 Generating main.tf, variables.tf, outputs.tf                                │
-│                                                                                │
-│ ┌─ Proposed Diff: main.tf ───────────────────────────────────────────────────┐ │
-│ │ + resource "aws_kms_key" "s3_key" {                                        │ │
-│ │ +   description             = "KMS CMK for S3 bucket storage encryption"   │ │
-│ │ +   deletion_window_in_days = 30                                           │ │
-│ │ +   enable_key_rotation     = true                                         │ │
-│ │ + }                                                                        │ │
-│ │ + resource "aws_s3_bucket" "secure_bucket" {                               │ │
-│ │ +   bucket = var.bucket_name                                               │ │
-│ │ + }                                                                        │ │
-│ └────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                │
-│ ⚡ Action Required: [Approve (Enter)]  [Edit Diff (e)]  [Reject (Esc)]         │
-└─────────────────────────────────────────────────────────── Model: claude-3.7-sonnet ┘
-```
+<p align="center">
+  <img src="assets/demo.gif" alt="OpsCode Terminal Demo" width="100%">
+</p>
 
 ---
 
