@@ -1,6 +1,6 @@
 [project]
 name = "talkops-opscode"
-version = "0.1.1"
+version = "0.1.2"
 description = "Autonomous CLI-first AI agent for DevOps, SRE, Platform Engineering, and Infrastructure as Code"
 readme = "README.md"
 requires-python = ">=3.12"

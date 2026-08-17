@@ -24,7 +24,7 @@
 <!-- TODO: Replace this ASCII mock with a VHS-generated terminal GIF/video once recorded -->
 
 ```
-┌─ OpsCode v0.1.1 ────────────────────────────────────────── [Auto: Shift+Tab] ──┐
+┌─ OpsCode v0.1.2 ────────────────────────────────────────── [Auto: Shift+Tab] ──┐
 │                                                                                │
 │ > User: Create an AWS S3 bucket with KMS customer-managed key encryption       │
 │                                                                                │
