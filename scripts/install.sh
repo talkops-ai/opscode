@@ -478,6 +478,7 @@ INSTALL_CMD=(
   "$PRERELEASE_FLAG"
   "--force"
   "--upgrade"
+  "--refresh"
 )
 
 # If directory contains pyproject.toml and src/opscode (local repository), allow installing from directory
