@@ -1,8 +1,12 @@
 """Version information and lightweight constants for ``opscode``."""
 
-# Keep the ``x-release-please-version`` annotation — release-please uses it to
-# bump ``__version__`` in sync with ``pyproject.toml`` on every release PR.
-__version__ = "0.1.0"  # x-release-please-version
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
+
+try:
+    __version__: str = _pkg_version("talkops-opscode")
+except PackageNotFoundError:
+    # Fallback for editable installs or running from source without install
+    __version__ = "0.0.0-dev"
 
 DOCS_URL = "https://github.com/talkops-ai/opscode"
 """URL for ``opscode`` documentation."""

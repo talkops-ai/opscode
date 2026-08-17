@@ -67,10 +67,23 @@
 
 set -euo pipefail
 
-INSTALLER_VERSION="0.1.0"
 PACKAGE_NAME="talkops-opscode"
 PRIMARY_BIN="opscode"
 ALIAS_BIN="ops"
+
+# Resolve latest version from PyPI (used for --version display)
+resolve_latest_pypi_version() {
+  local latest=""
+  if command -v curl >/dev/null 2>&1; then
+    latest="$(curl -sS "https://pypi.org/pypi/${PACKAGE_NAME}/json" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])" 2>/dev/null || true)"
+  fi
+  if [ -z "$latest" ]; then
+    latest="dev"
+  fi
+  printf '%s' "$latest"
+}
+
+INSTALLER_VERSION="$(resolve_latest_pypi_version)"
 
 print_help() {
   cat <<'EOF'
