@@ -9,7 +9,7 @@ Unlike general-purpose coding agents, OpsCode understands infrastructure. It kno
 ## Quick install
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.0/scripts/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.1/scripts/install.sh | bash
 
 # Launch the interactive TUI
 ops

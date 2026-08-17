@@ -24,7 +24,7 @@
 <!-- TODO: Replace this ASCII mock with a VHS-generated terminal GIF/video once recorded -->
 
 ```
-┌─ OpsCode v0.1.0 ────────────────────────────────────────── [Auto: Shift+Tab] ──┐
+┌─ OpsCode v0.1.1 ────────────────────────────────────────── [Auto: Shift+Tab] ──┐
 │                                                                                │
 │ > User: Create an AWS S3 bucket with KMS customer-managed key encryption       │
 │                                                                                │
@@ -55,7 +55,7 @@
 ### 1. Install
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.0/scripts/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.1/scripts/install.sh | bash
 ```
 
 > [!NOTE]

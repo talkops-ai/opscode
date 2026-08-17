@@ -9,7 +9,7 @@ OpsCode is a terminal agent for DevOps, Platform Engineering, and Infrastructure
 ### 1. Install
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.0/scripts/install.sh | bash
+curl -LsSf https://raw.githubusercontent.com/talkops-ai/opscode/v0.1.1/scripts/install.sh | bash
 ```
 
 ### 2. Launch the TUI
